@@ -1,0 +1,40 @@
+#Batcher with Concurrent Futures ThreadPool
+import concurrent.futures
+
+#Global batch run method, top level functions
+def RunBatchJob(job:TestingJob):
+    try:
+        print(f"Running Job [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
+        job.SetStatus("Running","")
+        sql = f"CALL RAFT_MODULES.test_keys('^(a+)+$', '{job.BL_Table_Name}');"
+        print(sql)
+        pandas_gbq.read_gbq(sql, project_id=job.environment, dialect='standard')
+        print(f"Finished Job  [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
+        job.SetStatus("Success","")
+    except Exception as e:
+        print(f"Error running Job  [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
+        print(str(e))
+        job.SetStatus("Error",str(e))
+    
+
+class Batch():
+    def __init__(self,environment:str,component:str,threadpoolsize:int,componentsToRun:list):
+        self.environment=environment
+        self.component=component
+        self.status="running"
+        self.threadpoolsize=threadpoolsize
+        self.jobs=componentsToRun
+        self.threadpool=None
+
+    def run(self):
+        #Create a threadpool for our batch
+        self.threadpool=concurrent.futures.ThreadPoolExecutor(max_workers=self.threadpoolsize)
+
+        #Queue all of the components to be tested
+        future_to_task = {self.threadpool.submit(RunBatchJob, task): task for task in self.jobs}
+
+
+    def get_json(self):
+        return {"environment":self.environment,"component":self.component,"status":self.status,"threadpoolsize":self.threadpoolsize}
+
+    
