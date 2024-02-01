@@ -1,0 +1,305 @@
+#Job Manager Prototype
+import pandas as pd
+runTests=True
+
+#Internal state management, BQ functions, and job management, workers, helpers etc
+class TestingJob():
+
+    def __init__(self,environment,component,keys_table,Table_Name, BL_Table_Name, Primary_Key, Aut_Compare_Flag, Columns_to_test, Exclude_Columns):
+        self.Table_Name=Table_Name
+        self.BL_Table_Name=BL_Table_Name
+        self.Primary_Key=Primary_Key
+        self.Aut_Compare_Flag=Aut_Compare_Flag
+        self.Columns_to_test=Columns_to_test
+        self.Exclude_Columns=Exclude_Columns
+        
+        #Information needed for the Batch
+        self.environment=environment
+        self.component=component
+        self.keys_table=keys_table
+        self.status="Queued"
+        self.message=""
+
+    #Dumps the test component to a string
+    def DebugDump(self):
+        print(f"""Table_Name={self.Table_Name}
+        BL_Table_Name={self.BL_Table_Name}
+        Primary_Key={self.Primary_Key}
+        Aut_Compare_Flag={self.Aut_Compare_Flag}
+        Columns_to_test={self.Columns_to_test}
+        Exclude_Columns={self.Exclude_Columns}""")
+
+    def SetStatus(self,status,message):
+        self.status=status
+        self.message=message
+
+    def GetTestStatus(self):
+        return {"Test_Name":self.BL_Table_Name,"Status":self.status,"Message":self.message}
+
+    def Get_JSON(self):
+        return f"""{{
+            "Test_Name":"{self.BL_Table_Name}",
+            "Status":"{self.status}",
+            "Message":"{self.message}"
+        }}""" 
+
+def GetTestComponentsForEnvironment(env):
+    SQL="""select Component,
+            BL_Dataset,
+            Test_dataset,
+            TestResults_dataset,
+            Keys_table,
+            Run_group,
+            Sub_run_group,
+            Site 
+            from RAFT_CONFIG.RAFT_MASTER_CONFIG where Active_flag='Y'"""
+    df=pd.read_gbq(SQL,project_id=env)
+    return df
+
+def GetTestsForComponent(env,component,keysTable):
+    try:
+        SQL=f"""select 
+            Table_Name,
+            BL_Table_Name,
+            Primary_Key,
+            Aut_Compare_Flag,
+            Columns_to_test,
+            Exclude_Columns
+            from RAFT_CONFIG.{keysTable}"""
+        df=pd.read_gbq(SQL,project_id=env)
+        print(SQL)
+
+        #Turn into objects
+        TestComponents=[]
+        for index, row in df.iterrows():
+            TestComponents.append(TestingJob(env,component,keysTable,row['Table_Name'],row['BL_Table_Name'],row['Primary_Key'],row['Aut_Compare_Flag'],row['Columns_to_test'],row['Exclude_Columns']))
+
+        return TestComponents
+    except Exception as e:
+        print(f"Error getting tests for {keysTable} in {env}" + str(e))
+        return []
+
+#Batcher with Concurrent Futures ThreadPool
+import concurrent.futures
+
+#Global batch run method, top level functions
+def RunBatchJob(job:TestingJob):
+    try:
+        print(f"Running Job [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
+        job.SetStatus("Running","")
+        sql = f"CALL RAFT_MODULES.test_keys('^(a+)+$', '{job.BL_Table_Name}');"
+        print(sql)
+        pandas_gbq.read_gbq(sql, project_id=job.environment, dialect='standard')
+        print(f"Finished Job  [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
+        job.SetStatus("Success","")
+    except Exception as e:
+        print(f"Error running Job  [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
+        print(str(e))
+        job.SetStatus("Error",str(e))
+    
+
+class Batch():
+    def __init__(self,environment:str,component:str,threadpoolsize:int,componentsToRun:list):
+        self.environment=environment
+        self.component=component
+        self.status="running"
+        self.threadpoolsize=threadpoolsize
+        self.jobs=componentsToRun
+        self.threadpool=None
+
+    def run(self):
+        #Create a threadpool for our batch
+        self.threadpool=concurrent.futures.ThreadPoolExecutor(max_workers=self.threadpoolsize)
+
+        #Queue all of the components to be tested
+        future_to_task = {self.threadpool.submit(RunBatchJob, task): task for task in self.jobs}
+
+
+    def get_json(self):
+        return {"environment":self.environment,"component":self.component,"status":self.status,"threadpoolsize":self.threadpoolsize}
+
+    
+
+
+
+#Internal business classes
+class Batch():
+    def __init__(self,environment:str,component:str,threadpoolsize:int):
+        self.environment=environment
+        self.component=component
+        self.status="running"
+        self.threadpoolsize=threadpoolsize
+
+    def get_json(self):
+        return {"environment":self.environment,"component":self.component,"status":self.status,"threadpoolsize":self.threadpoolsize}
+
+class Environment():
+    def __init__(self,name:str):
+        self.name=name
+        self.batches={}
+
+    def getBatches(self):
+        return self.batches
+
+    def isComponentRunning(self,component:str):
+        return component in self.batches
+
+    def getThreadUtilization(self):
+        if self.status=="running":
+            return sum([batch.threadpoolsize for batch in self.batches.values()])
+        else:
+            return 0
+        
+    def getTotalRunningBatches(self):
+        return [batch for batch in self.batches.values() if batch.status=="running"]
+
+    def RunComponent(self,component:str,threadpoolsize:int):
+        if self.isComponentRunning(component):
+            return (False,"Component already running")
+        else:
+            self.batches[component]=Batch(self.name,component,threadpoolsize)
+            return (True,"Component started")
+
+#Internal state management, BQ functions, and job management, workers, helpers etc
+def GetTestComponentsForEnvironment(env):
+    SQL="""select Component,
+            BL_Dataset,
+            Test_dataset,
+            TestResults_dataset,
+            Keys_table,Run_group,
+            Sub_run_group,
+            Site 
+            from RAFT_CONFIG.RAFT_MASTER_CONFIG where Active_flag='Y'"""
+    df=pd.read_gbq(SQL,project_id=env)
+    return df
+
+def GetTestsForComponent(env,keysTable):
+    SQL=f"""select 
+        Table_Name,
+        BL_Table_Name,
+        Primary_Key,
+        Aut_Compare_Flag,
+        Columns_to_test,
+        Exclude_Columns
+        from RAFT_CONFIG.{keysTable}"""
+    df=pd.read_gbq(SQL,project_id=env)
+    return df
+
+#----BP01 - test here
+#Test Component For Environment
+#if runTests:
+# ret=GetTestComponentsForEnvironment('datawx')
+# #ret
+# keysTable=ret["Keys_table"][0]
+# testsToRun=GetTestsForComponent('datawx',keysTable)
+# testsToRun
+
+#FastAPI - API endpoints
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Optional
+
+
+#Global state
+#-----------------------------------------------------------------------------------------------------------
+environmentNames=["datawx","radar-14","radar-12"]       #This needs to come from config file or DB
+
+environments={}
+for env in environmentNames:
+    environments[env]=Environment(env)
+#-----------------------------------------------------------------------------------------------------------
+app = FastAPI()
+
+@app.get("/get-environments")
+def get_environments():
+    return environments.keys()
+
+@app.get("/environment-tests")
+def get_environments(environment: str):
+    df=GetTestComponentsForEnvironment(environment)
+    return df.to_json()
+
+@app.get("/test-component")
+def test_component(environment: str,component:str):
+    env=environments[environment]
+    ret=env.RunComponent(environment,component)
+    status=ret[0]
+    message=ret[1]
+    return {"status":status,"message":message}
+    
+@app.get("/get-environment-stats")
+def get_environment_stats(environment: str):
+    env=environments[environment]
+    utilization=environments[environment].getThreadUtilization()
+    batches=env.getTotalRunningBatches(environment)
+    results={"RunningQueries": {utilization},"RunningBatches": batches}
+    return results
+
+@app.get("/get-environment-current-batches")
+def get_environment_current_batches(environment: str):
+    env=environments[environment]
+    batches=env.getBatches()
+    ret=[]
+    for batch in batches.values():
+        ret.append(batch.get_json())
+    return ret
+
+#Run webserver on thread
+import uvicorn
+import threading
+threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=4040, log_level="info")).start()
+
+
+#Test BPO2
+# #API tests
+# # ret=get_environment_stats("datawx")
+# # print(ret)
+# # ret=test_component("datawx","test_component",10)
+# # print(ret)
+# # ret=get_environment_stats("datawx")
+# # print(ret)
+# env=environments["datawx"]
+# print(env.batches)
+
+
+#Test BP03
+# #Test Batch enumeration
+# batch:Batch=None
+# env=environments["datawx"]
+# print(env.name)
+# print(type(env.batches))
+# print(f"Batches Total {len(env.batches)}")
+
+
+# for key in env.batches:
+#     batch=env.batches[key]
+#     print(batch)
+#     print(batch.status)
+#     print(batch.threadpoolsize)
+#     print(batch.component)
+#     print(batch.environment)
+    
+# stats=get_environment_stats("datawx")
+# print(stats)
+
+#Test BP04
+# #env=environments["datawx"]
+# #env.
+
+# #Wrong name test
+# # ret=test_component("datawx","test_component",10)
+# # ret
+
+# df=GetTestComponentsForEnvironment("datawx")
+# #print(df.head(10))
+
+# #Correct name test
+# ret=test_component("datawx","HBHK02_UNADJ_R14_11SO_COMMN_INTRA","HBUK_FIN_DATAHUB_COMMN_INTRA",2)
+# ret
+
+## #GetBatchStatus
+
+#Test BP05
+# ret=get_batch_status("datawx","HBHK02_UNADJ_R14_11SO_COMMN_INTRA")
+# ret
+
