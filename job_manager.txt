@@ -1,0 +1,102 @@
+#RAFT/FlowShift Job Manager
+from environment import Environment
+from sqlfunctions import GetTestComponentsForEnvironment
+import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Optional
+import uvicorn
+import threading
+from config import Config
+import sys
+
+#-----------------------------------------------------------------------------------------------------------
+#Load config
+#-----------------------------------------------------------------------------------------------------------
+
+#Config file loaded from command params - testing mode it is fixed
+if __name__ == "__main__":
+    config=Config()
+    if len(sys.argv)>1:
+        if not config.Load(sys.argv[1]):
+            print("Error loading config file")
+            sys.exit(1)
+    else:
+        print("Usage: job_manager.py <config file>")
+        sys.exit(1)
+
+else:
+    config=Config()
+    if not config.Load("config/test-datawx.json"):
+        print("Error loading config file")
+        sys.exit(1)
+
+#-----------------------------------------------------------------------------------------------------------
+#Global state
+#-----------------------------------------------------------------------------------------------------------
+environmentNames=config.environments
+environments={}
+for env in environmentNames:
+    environments[env]=Environment(env)
+#-----------------------------------------------------------------------------------------------------------
+app = FastAPI()
+
+@app.get("/get-environments")
+def get_environments():
+    return list(environments.keys())
+
+@app.get("/environment-tests")
+def get_tests_for_env(environment: str):
+    df=GetTestComponentsForEnvironment(environment)
+    return df.to_json()
+
+#To be demised
+@app.get("/test-component")
+def runtest_component(environment: str,component:str,keys_table:str,threadpoolsize:int):
+    env=environments[environment]
+    ret=env.TestComponent(component,keys_table,threadpoolsize)
+    status=ret[0]
+    message=ret[1]
+    return {"status":status,"message":message}
+
+##>>debuggging this    
+@app.get("/get-environment-stats")
+def get_environment_stats(environment: str):
+    env=environments[environment]
+    utilization=environments[environment].getThreadUtilization()
+    batches=env.getTotalRunningBatches()
+    results={"RunningQueries": utilization,"RunningBatches": batches}
+    return results
+
+@app.get("/get-environment-current-batches")
+def get_environment_current_batches(environment: str):
+    env=environments[environment]
+    batches=env.getBatches()
+    ret=[]
+    for batch in batches.values():
+        ret.append(batch.get_json())
+    return ret
+
+@app.get("/get-batch-status")
+def get_batch_status(environment,component):
+    env=environments[environment]
+    batches=env.getBatches()
+    ret=[]
+    for batch in batches.values():
+        if batch.component==component:
+            #Whole batch status -> st.write in steamlit
+            print(batch.get_json())
+
+            for job in batch.jobs:
+                print(job.GetTestStatus())
+                ret.append(job.GetTestStatus())
+    return ({"batch":batch.get_json(),"jobs":ret})
+
+
+
+#--------------------------------------------------------------------------------------------------------------------
+#check if this is main entry point
+if __name__ == "__main__":
+    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=4040, log_level="info")).start()    
+
+

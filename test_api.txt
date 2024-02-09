@@ -1,0 +1,48 @@
+#Integration Test for the API endpoints - without live server
+import pytest
+import os
+import time
+from job_manager import get_environments, get_tests_for_env, runtest_component, get_environment_stats,get_environment_current_batches,get_batch_status
+from config import Config
+
+def test_loadconfig():
+    # Testing loadconfig
+    config=Config()
+    passed=config.Load("config/test-datawx.json")
+    assert passed, "Expected loadconfig to pass"
+
+def test_get_environments():
+    # Testing get_environments
+    env = get_environments()
+    assert len(env) > 0, "Expected non-empty environment list"
+
+def test_get_tests_for_env():
+    environment = 'datawx'
+    env = get_tests_for_env(environment)
+    assert len(env) > 0, "The returned environment list should not be empty"
+
+@pytest.mark.parametrize("environment", ["datawx"])
+@pytest.mark.parametrize("component", ["HBHK02_UNADJ_R14_11SO_COMMN_INTRA"])
+@pytest.mark.parametrize("keys_table", ["HBUK_FIN_DATAHUB_COMMN_INTRA"])
+@pytest.mark.parametrize("threadpoolsize", [32])
+def test_runtest_component(environment:str,component:str,keys_table:str,threadpoolsize:int):
+    env = runtest_component(environment, component, keys_table, threadpoolsize)
+    passed = env["status"]
+    assert passed, "The test component should have passed"
+
+@pytest.mark.parametrize("environment", ["datawx"])
+def test_get_environment_stats(environment:str):
+    stats=get_environment_stats(environment)
+    assert ("RunningQueries" in stats) and ("RunningBatches" in stats), "The stats should have RunningQueries and RunningBatches"
+
+@pytest.mark.parametrize("environment", ["datawx"])
+def test_get_environment_current_batches(environment:str):
+    stats=get_environment_current_batches(environment)
+    assert isinstance(stats, list), "The stats should be a list"
+
+@pytest.mark.parametrize("environment", ["datawx"])
+@pytest.mark.parametrize("component", ["HBHK02_UNADJ_R14_11SO_COMMN_INTRA"])
+def test_get_batch_status(environment:str,component:str):
+    stats=get_batch_status(environment,component)
+    assert ("batch" in stats) and ("jobs" in stats), "The stats should have batch and jobs"
+    

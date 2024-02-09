@@ -1,0 +1,39 @@
+#BiqEuery Helper functions
+import pandas as pd
+from testingjob import TestingJob
+
+def GetTestComponentsForEnvironment(env):
+    SQL="""select Component,
+            BL_Dataset,
+            Test_dataset,
+            TestResults_dataset,
+            Keys_table,
+            Run_group,
+            Sub_run_group,
+            Site 
+            from RAFT_CONFIG.RAFT_MASTER_CONFIG where Active_flag='Y'"""
+    df=pd.read_gbq(SQL,project_id=env)
+    return df
+
+def GetTestsForComponent(env,component,keysTable):
+    try:
+        SQL=f"""select 
+            Table_Name,
+            BL_Table_Name,
+            Primary_Key,
+            Aut_Compare_Flag,
+            Columns_to_test,
+            Exclude_Columns
+            from RAFT_CONFIG.{keysTable}"""
+        df=pd.read_gbq(SQL,project_id=env)
+        print(SQL)
+
+        #Turn into objects
+        TestComponents=[]
+        for index, row in df.iterrows():
+            TestComponents.append(TestingJob(env,component,keysTable,row['Table_Name'],row['BL_Table_Name'],row['Primary_Key'],row['Aut_Compare_Flag'],row['Columns_to_test'],row['Exclude_Columns']))
+
+        return TestComponents
+    except Exception as e:
+        print(f"Error getting tests for {keysTable} in {env}" + str(e))
+        return []

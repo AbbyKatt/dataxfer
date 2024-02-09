@@ -1,0 +1,10 @@
+#Workflow manager business class
+#Handles procesing of workflows + utility functions on queued batch sequences
+
+class WorkFlowManager():
+
+    def __init__(self,environments,config):
+        self.environments=environments
+        self.config=config
+
+

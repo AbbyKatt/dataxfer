@@ -1,0 +1,36 @@
+import json
+
+#Test steps - represents a single test-compartment (single or multiple batch tasks) in the test sequence
+class TestStep():
+    def __init__(self,name,multiplicity,selectsql,function):
+        self.name=name
+        self.multiplicity=multiplicity
+        self.selectsql=selectsql
+        self.function=function
+
+#Config class handles environments and testflow definitions
+class Config():
+    def __init__(self):
+        self.workers=None
+        self.environments=[]
+        self.testFlows={}
+
+    #load JSON config
+    def Load(self,configPath:str):
+        print(f"Loading config [{configPath}]")
+        with open(configPath) as json_file:
+            data = json.load(json_file)
+            self.environments=data['environments']
+
+            #Get test workflows dictionary
+            workflows=data['workflows']
+            for workflow in workflows:
+                name=workflow["name"]
+                steps=[]
+                for sequence in workflow["sequence"]:
+                    steps.append(TestStep(sequence['name'],sequence['multiplicity'],sequence['selectsql'],sequence['function']))
+                    self.testFlows[name]=steps
+            print(f"Loaded {len(self.environments)} environments and {len(self.testFlows)} testflows")
+        return True
+
+        

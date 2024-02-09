@@ -1,5 +1,8 @@
 #Batcher with Concurrent Futures ThreadPool
 import concurrent.futures
+from testingjob import TestingJob
+import pandas_gbq
+
 
 #Global batch run method, top level functions
 def RunBatchJob(job:TestingJob):

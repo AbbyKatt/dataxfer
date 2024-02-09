@@ -1,40 +1,42 @@
-#Batcher with Concurrent Futures ThreadPool
-import concurrent.futures
+#Internal state management, BQ functions, and job management, workers, helpers etc
 
-#Global batch run method, top level functions
-def RunBatchJob(job:TestingJob):
-    try:
-        print(f"Running Job [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
-        job.SetStatus("Running","")
-        sql = f"CALL RAFT_MODULES.test_keys('^(a+)+$', '{job.BL_Table_Name}');"
-        print(sql)
-        pandas_gbq.read_gbq(sql, project_id=job.environment, dialect='standard')
-        print(f"Finished Job  [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
-        job.SetStatus("Success","")
-    except Exception as e:
-        print(f"Error running Job  [{job.environment} :  {job.component} :  {job.BL_Table_Name}]")
-        print(str(e))
-        job.SetStatus("Error",str(e))
-    
+class TestingJob():
 
-class Batch():
-    def __init__(self,environment:str,component:str,threadpoolsize:int,componentsToRun:list):
+    def __init__(self,environment,component,keys_table,Table_Name, BL_Table_Name, Primary_Key, Aut_Compare_Flag, Columns_to_test, Exclude_Columns):
+        self.Table_Name=Table_Name
+        self.BL_Table_Name=BL_Table_Name
+        self.Primary_Key=Primary_Key
+        self.Aut_Compare_Flag=Aut_Compare_Flag
+        self.Columns_to_test=Columns_to_test
+        self.Exclude_Columns=Exclude_Columns
+        
+        #Information needed for the Batch
         self.environment=environment
         self.component=component
-        self.status="running"
-        self.threadpoolsize=threadpoolsize
-        self.jobs=componentsToRun
-        self.threadpool=None
+        self.keys_table=keys_table
+        self.status="Queued"
+        self.message=""
 
-    def run(self):
-        #Create a threadpool for our batch
-        self.threadpool=concurrent.futures.ThreadPoolExecutor(max_workers=self.threadpoolsize)
+    #Dumps the test component to a string
+    def DebugDump(self):
+        print(f"""Table_Name={self.Table_Name}
+        BL_Table_Name={self.BL_Table_Name}
+        Primary_Key={self.Primary_Key}
+        Aut_Compare_Flag={self.Aut_Compare_Flag}
+        Columns_to_test={self.Columns_to_test}
+        Exclude_Columns={self.Exclude_Columns}""")
 
-        #Queue all of the components to be tested
-        future_to_task = {self.threadpool.submit(RunBatchJob, task): task for task in self.jobs}
+    def SetStatus(self,status,message):
+        self.status=status
+        self.message=message
 
+    def GetTestStatus(self):
+        return {"Test_Name":self.BL_Table_Name,"Status":self.status,"Message":self.message}
 
-    def get_json(self):
-        return {"environment":self.environment,"component":self.component,"status":self.status,"threadpoolsize":self.threadpoolsize}
+    def Get_JSON(self):
+        return f"""{{
+            "Test_Name":"{self.BL_Table_Name}",
+            "Status":"{self.status}",
+            "Message":"{self.message}"
+        }}""" 
 
-    

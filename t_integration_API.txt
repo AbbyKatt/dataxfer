@@ -1,0 +1,129 @@
+#Integration Test for the API endpoints - without live server
+from job_manager import get_environments, get_tests_for_env, runtest_component, get_environment_stats, get_environment_current_batches, get_batch_status
+import os
+import time
+from config import Config
+
+#------------------------------------------------------------------------------------------------------------------------
+showResults=True
+#------------------------------------------------------------------------------------------------------------------------
+
+def test_loadconfig():
+    print("Testing loadconfig")
+    try:
+        config=Config()
+        passed=config.Load("config/test-datawx.json")
+        if passed:
+            print("PASSED")
+            return True
+        else:
+            print("FAILED")
+            return False
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+
+
+def test_get_environments():
+    print("Testing get_environments")
+    try:
+        env=get_environments()
+        passed=len(env) > 0
+        if passed:
+            print("PASSED")
+            return True
+        else:
+            print("FAILED")
+            return False
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+
+def test_get_tests_for_env(environment:str):
+    print("Testing get_tests_for_env")
+    try:
+        env=get_tests_for_env(environment)
+        passed=len(env) > 0
+        if passed:
+            if showResults:
+                print(env)
+            print("PASSED")
+            return True
+        else:
+            print("FAILED")
+            return False
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+
+def test_test_component(environment:str,component:str,keys_table:str,threadpoolsize:int):
+    print("Testing test_component")
+    try:
+        env=runtest_component(environment,component,keys_table,threadpoolsize)
+        passed=env["status"]
+        if passed:
+            if showResults:
+                print(env)
+            print("PASSED")
+            return True
+        else:
+            print("FAILED")
+            return False
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+
+def test_get_environment_stats(environment:str):
+    print("Testing get_environment_stats")
+    try:
+        env=get_environment_stats(environment)
+        passed=len(env) > 0
+        if passed:
+            if showResults:
+                print(env)
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+
+def test_get_environment_current_batches(environment:str):
+    print("Testing get_environment_current_batches")
+    try:
+        env=get_environment_current_batches(environment)
+        passed=len(env) > 0
+        if passed:
+            if showResults:
+                print(env)
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+    
+def test_get_batch_status(environment:str,component:str):
+    print("Testing get_batch_status")
+    try:
+        env=get_batch_status(environment,component)
+        passed=len(env) > 0
+        if passed:
+            if showResults:
+                print(env)
+    except Exception as e:
+        print("TESTFAILED: " + str(e))
+        return False
+
+#Main--------------------------------------------------------------------------------------------------------------------
+environment="datawx"
+# test_get_environments()
+# test_get_tests_for_env(environment)
+test_test_component(environment,"datawx","HBUK_FIN_DATAHUB_COMMN_INTRA",1)
+# test_get_environment_stats(environment)
+test_get_environment_current_batches(environment)
+#test_get_batch_status(environment,"HBUK_FIN_DATAHUB_COMMN_INTRA")
+
+# # #Sleep 15 seconds
+# print("Watch the Batch run for 15 seconds...")
+# time.sleep(15)
+# print("Ok, we're done!")
+
+# os._exit(0)
+
+
+
