@@ -1,10 +1,43 @@
 #Workflow manager business class
 #Handles procesing of workflows + utility functions on queued batch sequences
+from config import Config, TemplateStep
+from workflow_compiler import WorkFlow_Compiler
+from batch_step import BatchStep
+from workflow import WorkFlow
 
+        
+#WorkFlow manager - manages all the workflows, handles processing of workflows, utility functions for enviromental/query usage
 class WorkFlowManager():
 
-    def __init__(self,environments,config):
-        self.environments=environments
+    def __init__(self,config:Config):
         self.config=config
+        self.workflows={}
 
+    @staticmethod
+    def GetWorkFlowKey(environment:str,testtype:str,component:str):
+        return f"{environment}:{testtype}/{component}"
 
+    def Terminate(self):
+        self.Terminated=True
+        for key in self.workflows:
+            self.workflows[key].Terminate()
+
+    def RunWorkFlow(self,environment:str,testtype:str,component:str,params:dict,threadpoolsize=4):
+        key=WorkFlowManager.GetWorkFlowKey(environment,testtype,component)
+        if key in self.workflows:
+            return False,"Workflow already running"
+        wf=WorkFlow(key,self,environment,testtype,component,params,threadpoolsize)
+        success,message=wf.Start()
+        if not success:
+            return False,message
+        else:
+            self.workflows[key]=wf
+            return True,"Workflow started"
+
+    #Gets the dashboard with status of all workflow steps        
+    def GetWorkflowBatchStatus(self,environment:str,testtype:str,component:str):
+        key=WorkFlowManager.GetWorkFlowKey(environment,testtype,component)
+        if key in self.workflows:
+            return self.workflows[key].GetWorkflowBatchStatus()
+        else:
+            return "Not Found"

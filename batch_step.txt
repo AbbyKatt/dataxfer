@@ -1,0 +1,14 @@
+#Batch step -> actual step in the workflow for a batch
+class BatchStep:
+
+    def __init__(self,name,runtier=0,ExecuteSQL="",ProjectID=""):
+        self.name=name
+        self.status="Queued"
+        self.message=""
+        self.runtier=runtier
+        self.ExecuteSQL=ExecuteSQL
+        self.ProjectID=ProjectID
+
+    def to_json(self):
+        return {"name":self.name,"status":self.status,"message":self.message,"runtier":self.runtier,"ExecuteSQL":self.ExecuteSQL,"ProjectID":self.ProjectID}
+

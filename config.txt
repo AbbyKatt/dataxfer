@@ -1,19 +1,23 @@
 import json
 
 #Test steps - represents a single test-compartment (single or multiple batch tasks) in the test sequence
-class TestStep():
+class TemplateStep():
     def __init__(self,name,multiplicity,selectsql,function):
         self.name=name
         self.multiplicity=multiplicity
         self.selectsql=selectsql
         self.function=function
 
+    def to_json(self):
+        return {"name":self.name,"multiplicity":self.multiplicity,"selectsql":self.selectsql,"function":self.function}
+
 #Config class handles environments and testflow definitions
 class Config():
     def __init__(self):
         self.workers=None
         self.environments=[]
-        self.testFlows={}
+        self.testtypes=[]
+        self.workFlows={}
 
     #load JSON config
     def Load(self,configPath:str):
@@ -21,16 +25,30 @@ class Config():
         with open(configPath) as json_file:
             data = json.load(json_file)
             self.environments=data['environments']
+            self.testtypes=data['test_types']
 
             #Get test workflows dictionary
             workflows=data['workflows']
             for workflow in workflows:
-                name=workflow["name"]
+                name=workflow["test_type"]
                 steps=[]
                 for sequence in workflow["sequence"]:
-                    steps.append(TestStep(sequence['name'],sequence['multiplicity'],sequence['selectsql'],sequence['function']))
-                    self.testFlows[name]=steps
-            print(f"Loaded {len(self.environments)} environments and {len(self.testFlows)} testflows")
+                    steps.append(TemplateStep(sequence['name'],sequence['multiplicity'],sequence['selectsql'],sequence['function']))
+                    self.workFlows[name]=steps
+            print(f"Loaded {len(self.environments)} Environments and {len(self.workFlows)} WorkFlows")
         return True
+
+    #Debug dump config
+    def to_json(self):
+        workFlowJSon={}
+        for key in self.workFlows:
+            workFlowJSon[key]=[step.to_json() for step in self.workFlows[key]]
+        return {"environments":self.environments,"testtypes":self.testtypes,"workflows":workFlowJSon}
+        
+    def testTypeExists(self,testType:str):
+        return testType in self.testtypes
+    
+    def getTestTemplate(self,testType:str):
+        return self.workFlows[testType]
 
         

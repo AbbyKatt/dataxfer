@@ -1,48 +1,205 @@
-#Integration Test for the API endpoints - without live server
+import json
 import pytest
-import os
-import time
-from job_manager import get_environments, get_tests_for_env, runtest_component, get_environment_stats,get_environment_current_batches,get_batch_status
-from config import Config
+from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus
+from config import TemplateStep
+from batch_step import BatchStep
+from workflow_compiler import WorkFlow_Compiler
+
+#---------------------------------------------------------------------------------------------------
+#Test Config
+#---------------------------------------------------------------------------------------------------
+testJson="config/test-datawx.json"
+showResults=True
+
+#---------------------------------------------------------------------------------------------------
+#Environment/Config Static tests
+#---------------------------------------------------------------------------------------------------
 
 def test_loadconfig():
     # Testing loadconfig
-    config=Config()
-    passed=config.Load("config/test-datawx.json")
-    assert passed, "Expected loadconfig to pass"
+    print(f"Testing loadconfig [{testJson}]")
+    ret=LoadConfig(testJson)
+    assert ret, "Expected loadconfig to pass"
 
-def test_get_environments():
-    # Testing get_environments
-    env = get_environments()
-    assert len(env) > 0, "Expected non-empty environment list"
+def test_getenvironments():
+    # Testing getenvironments
+    print(f"Testing getenvironments")
+    ret=get_environments()
+    if showResults:
+        print(ret)
+    assert len(ret)>0, "Expected getenvironments to return some environments"
 
-def test_get_tests_for_env():
-    environment = 'datawx'
-    env = get_tests_for_env(environment)
-    assert len(env) > 0, "The returned environment list should not be empty"
+def test_gettesttypes():
+    # Testing gettesttypes
+    print(f"Testing gettesttypes")
+    ret=get_test_types()
+    if showResults:
+        print(ret)
+    assert len(ret)>0, "Expected gettesttypes to return some test types"
 
-@pytest.mark.parametrize("environment", ["datawx"])
-@pytest.mark.parametrize("component", ["HBHK02_UNADJ_R14_11SO_COMMN_INTRA"])
-@pytest.mark.parametrize("keys_table", ["HBUK_FIN_DATAHUB_COMMN_INTRA"])
-@pytest.mark.parametrize("threadpoolsize", [32])
-def test_runtest_component(environment:str,component:str,keys_table:str,threadpoolsize:int):
-    env = runtest_component(environment, component, keys_table, threadpoolsize)
-    passed = env["status"]
-    assert passed, "The test component should have passed"
+#---------------------------------------------------------------------------------------------------
+# WorkFlow Compiler tests
+#---------------------------------------------------------------------------------------------------
+def test_workflowCompilerSingleStep():
+    print("Testing WorkFlowCompiler:BuildSingle")
+    step=TemplateStep("Test Singleton","Single","","Component: ($Component), ProjectID: $ProjectID")
+    comp=WorkFlow_Compiler("datawx","test1","component",{})
+    ret=comp.BuildSingle(step,1)
+    assert type(ret) is list,"BuildSingle must return a list"
+    assert len(ret)==1,"BuildSingle must return a list with a single BatchStep in it"
+    assert type(ret[0]) is BatchStep, "BuildSingle must return a list with a single BatchStep in it"
+    print("Batch Step:" + json.dumps(ret[0].to_json()))
 
-@pytest.mark.parametrize("environment", ["datawx"])
-def test_get_environment_stats(environment:str):
-    stats=get_environment_stats(environment)
-    assert ("RunningQueries" in stats) and ("RunningBatches" in stats), "The stats should have RunningQueries and RunningBatches"
+def test_workflowCompilerMultiStep():
+    print("Testing WorkFlowCompiler:BuildMulti")
+    step=TemplateStep("Test Multi","Multi","select Fruit, Animal from RAFT_CONFIG.RAFT_UNIT_TEST","CALL Unit_Test_$Component('The $Animal ate the $Fruit.')")
+    comp=WorkFlow_Compiler("datawx","test1","Test_Component",{})
+    ret=comp.BuildMulti(step,0)
+    assert type(ret) is list,"BuildMulti must return a list"
+    assert len(ret)==3,"BuildMulti must return a list with 3 BatchStep's in it"
+    for step in ret:
+        assert type(step) is BatchStep, "BuildMulti must return a list with a single BatchStep in it"
+        print("Batch Step:" + json.dumps(step.to_json()))
 
-@pytest.mark.parametrize("environment", ["datawx"])
-def test_get_environment_current_batches(environment:str):
-    stats=get_environment_current_batches(environment)
-    assert isinstance(stats, list), "The stats should be a list"
+def test_workflowCompilerBuildAll():
+    print("Testing WorkFlowCompiler:BuildMulti")
+    step=TemplateStep("Test Multi","Multi","select Fruit, Animal from RAFT_CONFIG.RAFT_UNIT_TEST","CALL Unit_Test_$Component('The $Animal ate the $Fruit.')")
+    comp=WorkFlow_Compiler("datawx","Data Compare","RAFT_UNIT_TEST",{})
+    cfg=GetConfig()
+    template=cfg.getTestTemplate("Data Compare")
+    wf=comp.Build(template)
 
-@pytest.mark.parametrize("environment", ["datawx"])
-@pytest.mark.parametrize("component", ["HBHK02_UNADJ_R14_11SO_COMMN_INTRA"])
-def test_get_batch_status(environment:str,component:str):
-    stats=get_batch_status(environment,component)
-    assert ("batch" in stats) and ("jobs" in stats), "The stats should have batch and jobs"
+    print("Compiled Workflow:")
+    for step in wf:
+        print(step.to_json())
+    print("\n\n")
     
+    assert type(wf) is list,"workflowCompilerBuild must return a list"
+    assert len(wf)==5,"BuildMulti must return a list with 6 BatchStep's in it"
+    for step in wf:
+        assert type(step) is BatchStep, "BuildMulti must return a list with a single BatchStep in it"
+        print("Batch Step:" + json.dumps(step.to_json()))
+
+
+#---------------------------------------------------------------------------------------------------
+# WorkFlow tests
+#---------------------------------------------------------------------------------------------------
+def test_startNonExistantJob():
+    # Testing startNonExistantJob
+    print(f"Testing startNonExistantJob")
+    ret=run_testworkflow("test","test","test",{})
+    if showResults:
+        print(ret)
+    assert ret[0]==False, "Expected startNonExistantJob to return false"
+
+@pytest.mark.dependency()
+def test_startNormalJob():
+    print(f"Testing startNormalJob")
+    ret=run_testworkflow("datawx","Data Compare","RAFT_UNIT_TEST",{})
+    if showResults:
+        print(ret)
+    assert ret[0]==True, "Expected startNormalJob to return true"
+
+@pytest.mark.dependency(depends=["test_startNormalJob"])
+def test_startDupeJob():
+    print(f"Testing test_startDupeJob")
+    ret=run_testworkflow("datawx","Data Compare","RAFT_UNIT_TEST",{})
+    if showResults:
+        print(ret)
+    assert ret[0]==False, "Expected startDupeJob to return false"
+
+#---------------------------------------------------------------------------------------------------
+# WorkFlow Status
+#---------------------------------------------------------------------------------------------------
+
+def test_getworkflowstatus():
+
+    #Allow the workflow to load! - BigQuery query takes about 6 seconds
+    import time
+    time.sleep(10)
+
+    # Testing getworkflowstatus
+    print(f"Testing getworkflowstatus")
+    ret=get_workflow_batchstatus("datawx","Data Compare","RAFT_UNIT_TEST")
+    print("---------------------------------------------------------------------------------------------------")
+    print("Batch Status:")
+    print("---------------------------------------------------------------------------------------------------")
+    for stat in ret:
+        print(f"Name: {stat['name']}, Status: {stat['status']}")
+    print("\n\n")
+
+    assert type(ret) is list, "Expected getworkflowstatus to return a list of statuses"
+    assert len(ret)>0, "Expected getworkflowstatus to return some status"
+    for step in ret:
+        assert type(step) is dict, "Expected getworkflowstatus to return a list of statuses"
+
+#---------------------------------------------------------------------------------------------------
+# Terminate/Cleanup
+#---------------------------------------------------------------------------------------------------
+
+def test_terminate():
+    print(f"Testing terminate")
+    ret=terminate()
+    if showResults:
+        print(ret)
+    assert ret==True, "Expected terminate to return True"
+
+##'RAFT_CONFIG.RAFT_UNIT_TEST
+
+#---------------------------------------------------------------------------------------------------
+#Manual testing
+#---------------------------------------------------------------------------------------------------
+    
+if __name__ == "__main__":
+    print("Running tests")
+    
+    #Load config, run static tests
+    print("--------------------------------------------------------------------")
+    print("Config Tests")
+    print("--------------------------------------------------------------------")
+    test_loadconfig()
+    # test_getenvironments()
+    # test_gettesttypes()
+    # print("--------------------------------------------------------------------")
+    # print("\n\n")
+
+    # #Workflow Compiler test
+    # print("--------------------------------------------------------------------")
+    # print("Compiler Tests")
+    # print("--------------------------------------------------------------------")
+    # test_workflowCompilerSingleStep()
+    # test_workflowCompilerMultiStep()
+    #test_workflowCompilerBuildAll()
+    # print("--------------------------------------------------------------------")
+    # print("\n\n")
+
+    #Workflow tests
+    print("--------------------------------------------------------------------")
+    print("Workflow Run Tests")
+    print("--------------------------------------------------------------------")
+    # test_startNonExistantJob()
+    test_startNormalJob()
+    # test_startDupeJob()
+    import time
+    time.sleep(4)
+    test_getworkflowstatus()
+    time.sleep(4)
+    test_getworkflowstatus()
+    time.sleep(4)
+    test_getworkflowstatus()
+    time.sleep(4)
+    test_getworkflowstatus()
+
+
+    print("--------------------------------------------------------------------")
+    print("\n\n")
+
+
+    print("--------------------------------------------------------------------")
+    print("Terminate")
+    print("--------------------------------------------------------------------")
+    test_terminate()
+
+    import time
+    time.sleep(30)
+    print("Done")

@@ -1,0 +1,70 @@
+#Workflow Compiler -> turns template workflows into actualized, validated workflow batch steps
+import pandas as pd
+from config import TemplateStep
+from batch_step import BatchStep
+
+class WorkFlow_Compiler:
+
+    def __init__(self,projectID:str,testType:str,component:str,params:dict):
+        self.projectID=projectID
+        self.testType=testType
+        self.component=component
+        self.params=params
+
+    def SubstituetParams(self,sql:str,rowParams={}):
+        #Top level and row level params
+        for key in self.params:
+            sql=sql.replace(f"${key}",self.params[key])
+        for key in rowParams:
+            sql=sql.replace(f"${key}",rowParams[key])
+
+        #UI params
+        sql=sql.replace("$ProjectID",self.projectID)
+        sql=sql.replace("$TestType",self.testType)
+        sql=sql.replace("$Component",self.component)
+        return sql
+
+    def BuildSingle(self,template:TemplateStep,runTier:int):
+        print(f"Building single step [{template.name}]")
+        functionStr=self.SubstituetParams(template.function)
+        step=BatchStep(template.name,runTier,functionStr)
+        print(f"Step: {step.to_json()}")
+        return [step]
+        
+    def BuildMulti(self,template:TemplateStep,runTier:int):
+        print(f"Building multi step [{template.name}]")
+        #For each row in df - create a dictionary of row values
+        tasks=[]
+        selectSQL=self.SubstituetParams(template.selectsql)
+        print(f"Running Select SQL: {selectSQL}")
+
+        df=pd.read_gbq(selectSQL,project_id='datawx')
+        for index, row in df.iterrows():
+            rowDict = row.to_dict()
+            stepFunction=template.function
+            stepFunction=self.SubstituetParams(stepFunction,rowDict)
+            step=BatchStep(template.name,runTier,stepFunction)
+            tasks.append(step)
+        return tasks
+
+    #Compiles a workflow template into one or more steps
+    def BuildStep(self,template:TemplateStep,runTier:int):
+        #Validate values for multiplicity
+        if template.multiplicity not in "Single" and template.multiplicity not in "Multi":
+            raise ValueError("Workflow JSON Template multiplicity must be either 'Single' or 'Multi'")    
+        if template.multiplicity=="Single":
+            return self.BuildSingle(template,runTier)
+        else:
+            return self.BuildMulti(template,runTier)
+
+    #Compiles whole workflow into discrete batch steps
+    def Build(self,workFlow:list):
+        runTier=0
+        batchSteps=[]
+        for templateStep in workFlow:
+            compiledSteps=self.BuildStep(templateStep,runTier)
+            for batchStep in compiledSteps:
+                batchSteps.append(batchStep)
+            runTier+=1
+        print(f"Compiled {len(workFlow)} template steps into {len(batchSteps)} discrete stages")
+        return batchSteps

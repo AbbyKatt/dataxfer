@@ -1,0 +1,145 @@
+#WorkFlow - represents a single workflow consisting of a sequence of tests
+import threading
+
+import pandas_gbq
+from config import TemplateStep
+from workflow_compiler import WorkFlow_Compiler
+import concurrent.futures
+from batch_step import BatchStep
+
+class WorkFlow():
+
+    def __init__(self,name,workFlowManager,environment:str,testtype:str,component:str,params:dict,threadpoolsize=4):
+        self.name=name
+        self.workFlowManager=workFlowManager
+        self.environment=environment
+        self.testtype=testtype
+        self.component=component
+        self.params=params
+        self.tests=[]
+        self.status="Initialized"
+        self.message=""
+
+        #Threading
+        self.ThreadPool=None
+        self.futures=None
+        self.WorkFlowManagerThread=None
+        self.threadpoolsize=threadpoolsize
+        self.RunLevel=0
+        self.Terminated=False
+
+    def Terminate(self):
+        #Shutdown threadpool + main thread
+        self.Terminated=True
+        if self.WorkFlowManagerThread is not None:
+            self.WorkFlowManagerThread.join()
+            self.WorkFlowManagerThread=None
+        if self.ThreadPool is not None:
+            self.ThreadPool.shutdown()
+            self.ThreadPool=None
+
+    def GetWorkflowBatchStatus(self):
+        batchtasks=[]
+        for step in self.tests:
+            batchtasks.append(step.to_json())
+        return batchtasks
+
+    def BuildTestBatchFromTemplate(self,template:list):
+        try:
+            step:TemplateStep=None
+            compiler=WorkFlow_Compiler(self.environment,self.testtype,self.component,self.params)
+            self.tests=compiler.Build(template)
+            self.status="Initialized"
+            self.message=""
+            return True,""
+        except Exception as e:
+            self.status="Error"
+            self.message="Eror Compiling Batch from JSON:" + str(e)
+            return False,str(e)
+
+    def DebugDumpSteps(self):
+        for step in self.tests:
+            print(step.to_json())
+
+    def GetTasksForRunLevel(self,runlevel:int):
+        tasks=[]
+        for step in self.tests:
+            if step.runtier==runlevel:
+                tasks.append(step)
+        return tasks
+    
+    def SubstituteParams(self,strreplace):
+        strreplace=strreplace.replace("%Name",self.name)
+        return strreplace
+
+    #Multi-threaded batch step runner - this function is called concurrently for each query in threadpool
+    def __threadRunBatchStep(self,step:BatchStep):
+        try:
+            step.status="Running"
+            step.message=""
+            print(f"WorkFlowManager:__threadRunBatchStep: Running task [{step.name}]")
+            sql=self.SubstituteParams(step.ExecuteSQL)
+            print(f"WorkFlowManager:__threadRunBatchStep: Running in project { self.environment } the SQL: [{sql}]")
+            pandas_gbq.read_gbq(sql, project_id=self.environment, dialect='standard')
+            print(f"WorkFlowManager:__threadRunBatchStep: Finished task [{step.name}]")
+            step.status="Complete"
+            step.message=""
+            return
+        except Exception as e:
+            print(f"WorkFlowManager:__threadRunBatchStep: Error running task [{step.name}]")
+            print(str(e))
+            step.status="Error"
+            step.message=str(e)
+            return
+
+    def __MultiThreadExecute(self,tasks):
+        #Create a threadpool for our batch
+        self.ThreadPool=concurrent.futures.ThreadPoolExecutor(max_workers=self.threadpoolsize)
+        self.futures=[]
+        print("Queueing tasks")
+        for task in tasks:
+            print(f"WorkFlowManager:__MultiThreadExecute: Queueing task [{task.name}]")
+            self.futures.append(self.ThreadPool.submit(self.__threadRunBatchStep, task))
+
+        print("Tasks queued, waiting for completion")
+        # Wait for all the futures to complete
+        concurrent.futures.wait(self.futures)
+        print(f"All tasks complete in runlevel {self.RunLevel}")
+
+    #Main worker thread that manages this workflow
+    def __ManagerThreadRun(self):
+        print(f"WorkFlowManager:__ManagerThreadRun: Starting workflow [{self.name}]")
+        
+        #Load workflow
+        print(f"WorkFlowManager:__ManagerThreadRun: Loading WorkFlow JSON")
+        passed,message=self.BuildTestBatchFromTemplate(self.workFlowManager.config.getTestTemplate(self.testtype))
+        if not passed:
+            self.status="Error"
+            self.message=message
+            return
+        print(f"WorkFlowManager:__ManagerThreadRun: WorkFlow JSON Compiled into {len(self.tests)} steps")
+
+        #Main batch loop
+        tasksToRun=self.GetTasksForRunLevel(self.RunLevel)
+        while len(tasksToRun)>0 and not self.Terminated:
+            print(f"WorkFlowManager:__ManagerThreadRun: Running {len(tasksToRun)} tasks at runlevel {self.RunLevel}")
+
+            #Batch run all tasks in this tier            
+            self.__MultiThreadExecute(tasksToRun)
+            # for task in tasksToRun:
+            #     print(f"WorkFlowManager:__ManagerThreadRun: Running task [{task.name}]")
+
+            self.RunLevel+=1
+            tasksToRun=self.GetTasksForRunLevel(self.RunLevel)
+
+        print(f"WorkFlowManager:__ManagerThreadRun: End of Thread [{self.name}]") 
+        
+    def Start(self):
+        if not self.workFlowManager.config.testTypeExists(self.testtype):
+            return False,f"Test type [{self.testtype}] does not exist in config"
+        else:
+            #Run workflow manager thread
+            self.WorkFlowManagerThread = threading.Thread(target=self.__ManagerThreadRun)
+            self.WorkFlowManagerThread.start()
+            return True,"Workflow Thread Started..."
+        

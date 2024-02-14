@@ -1,0 +1,75 @@
+from config import Config
+from workflow_manager import WorkFlowManager
+
+import sys
+import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Optional
+import uvicorn
+import threading
+
+
+#---------------------------------------------------------------------------------------------------
+#Global Application State
+#---------------------------------------------------------------------------------------------------
+gConfig=Config()
+gWorkFlowManager=WorkFlowManager(gConfig)
+app = FastAPI()
+
+#LoadConfig - called different for main app and unit-testing
+def LoadConfig(configPath:str):
+    try:
+        global gConfig
+        gConfig.Load(configPath)
+        return True
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        return False
+
+#For testing
+def GetConfig():
+    global gConfig
+    return gConfig
+#---------------------------------------------------------------------------------------------------
+#FastAPI
+#---------------------------------------------------------------------------------------------------
+
+@app.get("/get-environments")
+def get_environments():
+    global gConfig
+    return gConfig.environments
+
+@app.get("/get-test-types")
+def get_test_types():
+    return gConfig.testtypes
+
+@app.get("/run-testworkflow")
+def run_testworkflow(environment: str,testtype: str,component: str,params: dict,threadpoolsize: Optional[int]=4):
+    global gWorkFlowManager
+    return gWorkFlowManager.RunWorkFlow(environment,testtype,component,params,threadpoolsize)
+
+# @app.get("/terminate")
+def terminate():
+    global gWorkFlowManager
+    gWorkFlowManager.Terminate()
+    return True
+
+@app.get("/get-workflow-batch-status")
+def get_workflow_batchstatus(environment: str,testtype: str,component: str):
+    global gWorkFlowManager
+    return gWorkFlowManager.GetWorkflowBatchStatus(environment,testtype,component)
+
+#---------------------------------------------------------------------------------------------------
+#Main Application Loop
+#---------------------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    config=Config()
+    if len(sys.argv)>1:
+        if not LoadConfig(sys.argv[1]):
+            print("Error loading config file")
+            sys.exit(1)
+    else:
+        print("Usage: job_manager.py <config file>")
+        sys.exit(1)
