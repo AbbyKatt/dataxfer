@@ -1,0 +1,19 @@
+{
+    "environments":["datawx","radar-14","radar-12"],
+    "test_types":{"Data Compare":"CMPR","MetaData Compare":"METADATA_CMPR","RefData Compare":"REFDATA_CMPR","Aggregated Balance Compare":"AGG_BAL_CMPR"},
+    "workflows":[
+
+        {"test_type":"Data Compare",
+            "sequence":
+                [
+                    {"name":"Initializer","multiplicity":"Single","selectsql":"","function":"CALL RAFT_MODULES.RAFT_{test_type}_INITIALIZE({result_set},{Component)"},
+                    {"name":"TestsLoop","multiplicity":"Multi","selectsql":"select * from RAFT_CONFIG.$Component", "function":"CALL RAFT_RESULTS.insert_test_result('%Name', '$Fruit', '$Animal');"},
+                    {"name":"Finalizer","multiplicity":"Single","selectsql":"","function":"CALL RAFT_RESULTS.insert_test_result('Finalizer', 'Finalizer', 'Test Completed!');"}
+                ]
+        }
+
+        
+    ]
+}
+
+
