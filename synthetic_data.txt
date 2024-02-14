@@ -1,0 +1,10 @@
+import pandas as pd
+#Create an examples tabke
+#Create master config table RAFT_CONFIG.RAFT_MASTER_CONFIG
+fields=["Fruit","Animal"]
+df=pd.DataFrame(columns=fields)
+df.loc[0] = ['Banana',"Monkey"]
+df.loc[1] = ['Tomato',"Bunny"]
+df.loc[2] = ['Llama',"Pumpkin"]
+df.to_gbq('RAFT_CONFIG.RAFT_UNIT_TEST',project_id='datawx',if_exists='replace')
+
