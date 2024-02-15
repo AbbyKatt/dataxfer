@@ -180,16 +180,11 @@ if __name__ == "__main__":
     # test_startNonExistantJob()
     test_startNormalJob()
     # test_startDupeJob()
-    import time
-    time.sleep(4)
-    test_getworkflowstatus()
-    time.sleep(4)
-    test_getworkflowstatus()
-    time.sleep(4)
-    test_getworkflowstatus()
-    time.sleep(4)
-    test_getworkflowstatus()
-
+    
+    while True:
+        import time
+        time.sleep(4)
+        test_getworkflowstatus()
 
     print("--------------------------------------------------------------------")
     print("\n\n")

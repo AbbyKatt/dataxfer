@@ -44,12 +44,11 @@ class WorkFlow():
             batchtasks.append(step.to_json())
         return batchtasks
 
-    def BuildTestBatchFromTemplate(self,template:list):
+    def BuildTestBatchFromTemplate(self,template:list,initializerOnly=False):
         try:
-            step:TemplateStep=None
             compiler=WorkFlow_Compiler(self.environment,self.testtype,self.component,self.params)
             self.tests=compiler.Build(template)
-            self.status="Initialized"
+            self.status="Queued"
             self.message=""
             return True,""
         except Exception as e:
@@ -74,6 +73,9 @@ class WorkFlow():
 
     #Multi-threaded batch step runner - this function is called concurrently for each query in threadpool
     def __threadRunBatchStep(self,step:BatchStep):
+
+        #TODO - error handling, needs to affect the workflow status
+        #Probably needs to decide on a strategy for error handling like allowSome or something
         try:
             step.status="Running"
             step.message=""
@@ -110,14 +112,30 @@ class WorkFlow():
     def __ManagerThreadRun(self):
         print(f"WorkFlowManager:__ManagerThreadRun: Starting workflow [{self.name}]")
         
+        #Set up ephemeral batch with Initializer only
+        passed,message=self.BuildTestBatchFromTemplate(self.workFlowManager.config.getTestTemplate(self.testtype),True)
+        if not passed:
+            self.status="Error"
+            self.message=message
+            return
+        self.status="Initializing"
+
+        #Run initializer step in main worker thread
+        print(f"WorkFlowManager:__ManagerThreadRun: Running initializer step")
+        initializer=self.tests[0]
+        self.__threadRunBatchStep(initializer)
+
         #Load workflow
-        print(f"WorkFlowManager:__ManagerThreadRun: Loading WorkFlow JSON")
+        print(f"WorkFlowManager:__ManagerThreadRun: Compiling WorkFlow JSON")
         passed,message=self.BuildTestBatchFromTemplate(self.workFlowManager.config.getTestTemplate(self.testtype))
         if not passed:
             self.status="Error"
             self.message=message
             return
         print(f"WorkFlowManager:__ManagerThreadRun: WorkFlow JSON Compiled into {len(self.tests)} steps")
+
+        #Replace first step with initializer
+        self.tests[0]=initializer
 
         #Main batch loop
         tasksToRun=self.GetTasksForRunLevel(self.RunLevel)

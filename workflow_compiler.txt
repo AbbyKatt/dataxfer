@@ -58,7 +58,7 @@ class WorkFlow_Compiler:
             return self.BuildMulti(template,runTier)
 
     #Compiles whole workflow into discrete batch steps
-    def Build(self,workFlow:list):
+    def Build(self,workFlow:list,intializerOnly=False):
         runTier=0
         batchSteps=[]
         for templateStep in workFlow:
@@ -66,5 +66,8 @@ class WorkFlow_Compiler:
             for batchStep in compiledSteps:
                 batchSteps.append(batchStep)
             runTier+=1
+            if intializerOnly:
+                print("Intializer only mode - stopping after first step")
+                break
         print(f"Compiled {len(workFlow)} template steps into {len(batchSteps)} discrete stages")
         return batchSteps
