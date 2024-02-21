@@ -1,0 +1,199 @@
+import json
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import datetime
+import requests
+from st_aggrid import AgGrid, GridOptionsBuilder
+from urllib.parse import quote
+
+#API - interface, move to external library-------------------------------------------------------------------
+API_URL = "http://localhost:4040"
+
+@st.cache_data
+def get_environments():
+    response = requests.get(API_URL + "/get-environments")
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve environments. Status code: {response.status_code}")
+        return []
+
+@st.cache_data
+def get_test_types():
+    response = requests.get(API_URL + "/get-test-types")
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve test types. Status code: {response.status_code}")
+        return []
+
+@st.cache_data
+def get_ComponentsForEnvironment(environment):
+    response = requests.get(API_URL + "/get-test-components?environment=" + environment)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve testable Components for environments. Status code: {response.status_code}")
+        return []
+
+#gets environmental usage
+def get_EnvironmentStats(environment: str):
+    response = requests.get(API_URL + "/get-environment-usage?environment=" + environment)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve environment stats. Status code: {response.status_code}")
+        return []    
+
+#Kicks off a testing workflow in the environment
+def run_Test_Workflow(environment: str,testtype: str,component: dict,threadpoolsize:int=4):
+    encoded_environment = quote(environment)
+    encoded_testtype = quote(testtype)
+    encoded_component = quote(component)
+    encoded_batchSize = quote(str(batchSize))
+    #encoded_params = quote(json.dumps(params))
+    encoded_params = quote(json.dumps({}))
+    encoded_threadpoolsize = quote(str(threadpoolsize))
+    #&params={encoded_params}
+    URL=API_URL + f"/run-testworkflow?environment={encoded_environment}&testtype={encoded_testtype}&component={encoded_component}&threadpoolsize={encoded_threadpoolsize}"
+    response=requests.get(URL)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to start test job. Status code: {response.text}")
+        return []
+
+# def run_testworkflow(environment: str,testtype: str,component: str,params: dict,threadpoolsize: Optional[int]=4):
+#     global gWorkFlowManager
+#     return gWorkFlowManager.RunWorkFlow(environment,testtype,component,params,threadpoolsize)
+
+# #Starts a batch test job for a component
+# def test_Component(environment: str,component:str,keys_table,batchSize):
+#     encoded_environment = quote(environment)
+#     encoded_component = quote(component)
+#     encoded_batchSize = quote(str(batchSize))
+#     encoded_keys_table = quote(keys_table)
+
+#     URL = f"{API_URL}/test-component?environment={encoded_environment}&component={encoded_component}&keys_table={encoded_keys_table}&threadpoolsize={encoded_batchSize}"    
+#     #st.write(URL)    
+#     response=requests.get(URL)
+#     st.write(response)
+#     if response.status_code == 200:
+#         return response.json()  
+#     else:
+#         st.error(f"Failed to start test job. Status code: {response.status_code}")
+#         return []
+
+#------------------------------------------------------------------------------------------------------------
+
+#use wide layout
+st.set_page_config(layout="wide")
+
+st.markdown('<style>h1{color: #FFFFFF; text-align: center;}</style>', unsafe_allow_html=True)
+st.title("FlowShift")
+st.subheader("Launch New Batch Testing Job")
+col1,col2=st.columns(2)
+with col1:
+    environment=st.selectbox("Select Environment", get_environments())
+with col2:
+    testtype=st.selectbox("Select Test Type", get_test_types().keys())
+
+if st.button("Detect Tests"):
+    st.write(f"Detecting Available Test Components in {environment}...")
+    TestableComponents = json.loads(get_ComponentsForEnvironment(environment))
+    st.session_state.TestableComponents = TestableComponents
+
+    #Save a mapping table for later so we can work out what keys table to use for each component
+    # compMapping={}
+    # components=TestableComponents["Component"]
+    # keys_table=TestableComponents["Keys_table"]
+    # compMapping={}
+    # for key in components.keys():
+    #     comp=components[key]
+    #     keyt=keys_table[key]
+    #     compMapping[comp]=keyt
+    # st.session_state.compMapping = compMapping        
+
+if 'TestableComponents' in st.session_state:
+    #st.write(TestableComponents)
+    df = pd.DataFrame.from_dict(st.session_state.TestableComponents)
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_selection('single')  # Change to 'multiple' for multi-row selection
+    gb.configure_grid_options(domLayout='autoHeight')
+    grid_options = gb.build()
+
+    # Fit columns on grid load
+    grid_response = AgGrid(
+        df, 
+        gridOptions=grid_options, 
+        height=400, # Adjust height (in pixels)
+        fit_columns_on_grid_load=True
+    )
+
+    # Get selected rows
+    selected_rows = grid_response['selected_rows']
+
+    #Build params dictionary from selected rows
+    params={}
+    if len(selected_rows)>0:
+        for key in selected_rows[0].keys():
+            #Only add keys that don't start with _
+            if key[0]!="_":
+                params[key]=selected_rows[0][key]
+        #st.write(params)
+
+    if len(selected_rows)>0:
+
+        st.markdown("***")  
+        col1,col2= st.columns(2)
+        with col1:
+            stats=get_EnvironmentStats(environment)
+            #st.write(stats)
+            st.subheader(f"Environmental Usage for [{environment}]")
+            st.write(f"Total Test Workflows: {stats['RunningWorkFlows']}")
+            st.write(f"Total Test Batches: {stats['RunningBatches']}")
+            st.write(f"Running Test Queries: {stats['RunningQueries']} ")
+
+            #linebreak 
+            st.markdown("<br>", unsafe_allow_html=True)
+        
+            #show progress bar
+            progress=stats['RunningQueries']/64.0
+            st.progress(progress,"Utilisation")
+
+
+        with col2:
+            #Calculate max batch size
+            st.subheader(f"Begin Batch Testing in [{environment}]")
+            maxBatchSize=64-(stats['RunningQueries'])
+            if maxBatchSize<1:
+                st.error("Environment is at max capacity - please wait for queries to complete. Check Monitor for details")
+            else:            
+                st.write(f"To not run into the BigQuery limit of 64 concurrent queries - please select a reasonable batch size")
+                batchSize=st.slider("Max Concurrent Testing Queries",1,int(maxBatchSize),int(maxBatchSize/2))
+                runTest=st.button("Test Component", key=selected_rows[0]['Component'])
+        st.markdown("***")
+
+        #Run test
+        if runTest:
+                    st.write(f"Starting Test Job for {selected_rows[0]['Component']} in {environment}...")
+
+                    #Launch component using data from grid on selected row
+                    comp=selected_rows[0]['Component']
+                    testypedict=get_test_types()
+                    testtype_short=testypedict[testtype]
+                    ret=run_Test_Workflow(environment,testtype_short,comp,batchSize)
+                    #st.write(ret)
+                    if ret[0]==False:
+                        st.error("Failed to start test job:" + ret[1])
+                    else:
+                        st.success("Test Job Started")
+
+    else:
+        st.write("Select a test to proceed...")
+
+
+    

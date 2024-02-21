@@ -1,0 +1,99 @@
+import json
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import datetime
+import requests
+from st_aggrid import AgGrid, GridOptionsBuilder
+from urllib.parse import quote
+
+#API - interface, move to external library-------------------------------------------------------------------
+API_URL = "http://localhost:4040"
+
+@st.cache_data
+def get_environments():
+    response = requests.get(API_URL + "/get-environments")
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve environments. Status code: {response.status_code}")
+        return []
+
+#gets environmental usage
+def get_running_workflows(environment: str):
+    response = requests.get(API_URL + "/get-running-workflows?environment=" + environment)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve running workflows. Status code: {response.status_code}")
+        return []    
+
+
+def get_workflow_batchstatus(environment: str,testtype: str,component: str):
+    response = requests.get(API_URL + "/get-workflow-batch-status?environment=" + environment + "&testtype=" + testtype + "&component=" + component)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve workflow batch status. Status code: {response.status_code}")
+        return []
+
+#---------------------------------------------------------------------------------------
+
+#use wide layout
+st.set_page_config(layout="wide")
+
+st.markdown('<style>h1{color: #FFFFFF; text-align: center;}</style>', unsafe_allow_html=True)
+st.title("FlowShift")
+st.subheader("Launch New Batch Testing Job")
+col1,col2=st.columns([4,1])
+with col1:
+    environment=st.selectbox("Select Environment", [""] + get_environments())
+with col2:
+    st.markdown("<br>",unsafe_allow_html=True)
+    doRefresh=st.button("Refresh")
+
+if len(environment)>0 or doRefresh:
+
+    runningTests=get_running_workflows(environment)
+    if len(runningTests)>0:
+        st.write("Running Tests")
+        #st.write(runningTests)
+        df=pd.DataFrame(runningTests)
+
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_selection('single')  # Change to 'multiple' for multi-row selection
+        gb.configure_grid_options(domLayout='autoHeight')
+        grid_options = gb.build()
+
+        # Fit columns on grid load
+        grid_response = AgGrid(
+            df, 
+            gridOptions=grid_options, 
+            height=400, # Adjust height (in pixels)
+            fit_columns_on_grid_load=True
+        )
+
+        # Get selected rows
+        selected_rows = grid_response['selected_rows']
+        if len(selected_rows)>0:
+            st.markdown("---")
+            selected_row=selected_rows[0]
+            testtype=selected_row["TestType"]
+            component=selected_row["Component"]
+            st.subheader(f"Workflow: {environment} / {testtype} / {component}")
+            st.text(f"Status: {selected_row['Status']}")
+            st.text(f"Message: {selected_row['Message']}")
+            st.markdown("<br>",unsafe_allow_html=True)
+
+            #Show grid of batch
+            wfbatchdict=get_workflow_batchstatus(environment,testtype,component)
+            dfbatch=pd.DataFrame(wfbatchdict)
+            st.write(dfbatch)
+
+
+    else:
+        st.write("No running tests")
+
+    
