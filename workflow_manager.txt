@@ -34,6 +34,22 @@ class WorkFlowManager():
             self.workflows[key]=wf
             return True,"Workflow started"
 
+    #Gets the current total usage stats for the environment
+    def GetUsageStats(self,environment:str):
+        runningQueries=0
+        runningBatches=0
+        runningWorkFlows=0
+        for key in self.workflows:
+            wf:WorkFlow=self.workflows[key]
+            if wf.environment==environment:
+                runningWorkFlows+=1
+                runningBatches+=len(wf.tests)
+                for step in wf.tests:   #type: BatchStep
+                    if step.status=="Running":
+                        runningQueries+=1
+        results={"RunningQueries": runningQueries,"RunningBatches": runningBatches,"RunningWorkFlows":runningWorkFlows}    
+        return results
+
     #Gets the dashboard with status of all workflow steps        
     def GetWorkflowBatchStatus(self,environment:str,testtype:str,component:str):
         key=WorkFlowManager.GetWorkFlowKey(environment,testtype,component)
@@ -41,3 +57,27 @@ class WorkFlowManager():
             return self.workflows[key].GetWorkflowBatchStatus()
         else:
             return "Not Found"
+        
+    #Gets the running workflows for an environment
+    def GetRunningWorkFlows(self,environment:str):
+        results=[]
+        for key in self.workflows:
+            wf:WorkFlow=self.workflows[key]
+            if wf.environment==environment:
+                statusRow={}
+                statusRow["key"]=wf.GetWorkFlowKey()
+                statusRow["TestType"]=wf.testtype
+                statusRow["Component"]=wf.component
+                statusRow["Status"]=wf.status
+                
+                #Get batch status
+                tasks,running,complete,failed=wf.GetBatchTaskStats()
+                statusRow["Tasks"]=tasks
+                statusRow["Running"]=running
+                statusRow["Complete"]=complete
+                statusRow["Failed"]=failed
+                statusRow["Message"]=wf.message
+
+                results.append(statusRow)
+
+        return results

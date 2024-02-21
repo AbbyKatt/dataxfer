@@ -1,5 +1,6 @@
 from config import Config
 from workflow_manager import WorkFlowManager
+from sqlfunctions import GetTestComponentsForEnvironment
 
 import sys
 import pandas as pd
@@ -44,10 +45,21 @@ def get_environments():
 def get_test_types():
     return gConfig.testtypes
 
+@app.get("/get-test-components")
+def get_tests_for_env(environment: str):
+    df=GetTestComponentsForEnvironment(environment)
+    return df.to_json()
+
 @app.get("/run-testworkflow")
-def run_testworkflow(environment: str,testtype: str,component: str,params: dict,threadpoolsize: Optional[int]=4):
+def run_testworkflow(environment: str,testtype: str,component: str,threadpoolsize:int):
+    #params: dict
     global gWorkFlowManager
-    return gWorkFlowManager.RunWorkFlow(environment,testtype,component,params,threadpoolsize)
+    return gWorkFlowManager.RunWorkFlow(environment,testtype,component,{},int(threadpoolsize))
+
+@app.get("/get-environment-usage")
+def get_environment_usage(environment: str):
+    global gWorkFlowManager
+    return gWorkFlowManager.GetUsageStats(environment)
 
 # @app.get("/terminate")
 def terminate():
@@ -55,10 +67,16 @@ def terminate():
     gWorkFlowManager.Terminate()
     return True
 
+@app.get("/get-running-workflows")
+def get_running_workflows(environment: str):
+    global gWorkFlowManager
+    return gWorkFlowManager.GetRunningWorkFlows(environment)
+
 @app.get("/get-workflow-batch-status")
 def get_workflow_batchstatus(environment: str,testtype: str,component: str):
     global gWorkFlowManager
     return gWorkFlowManager.GetWorkflowBatchStatus(environment,testtype,component)
+
 
 #---------------------------------------------------------------------------------------------------
 #Main Application Loop
@@ -70,6 +88,18 @@ if __name__ == "__main__":
         if not LoadConfig(sys.argv[1]):
             print("Error loading config file")
             sys.exit(1)
+        else:
+            threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=4040, log_level="info")).start()    
     else:
         print("Usage: job_manager.py <config file>")
         sys.exit(1)
+
+    while True:
+        print("Enter 'exit' to exit")
+        cmd=input(">")
+        if cmd=="exit":
+            terminate()
+            break
+        else:
+            print("Unknown command")
+            continue

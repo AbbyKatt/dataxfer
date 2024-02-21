@@ -46,7 +46,7 @@ class Config():
         return {"environments":self.environments,"testtypes":self.testtypes,"workflows":workFlowJSon}
         
     def testTypeExists(self,testType:str):
-        return testType in self.testtypes
+        return testType in self.testtypes.values()
     
     def getTestTemplate(self,testType:str):
         return self.workFlows[testType]

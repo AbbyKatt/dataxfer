@@ -1,0 +1,15 @@
+#BiqEuery Helper functions
+import pandas as pd
+
+def GetTestComponentsForEnvironment(env):
+    SQL="""select Component,
+            BL_Dataset,
+            Test_dataset,
+            TestResults_dataset,
+            Keys_table,
+            Run_group,
+            Sub_run_group,
+            Site 
+            from RAFT_CONFIG.RAFT_MASTER_CONFIG where Active_flag='Y'"""
+    df=pd.read_gbq(SQL,project_id=env)
+    return df

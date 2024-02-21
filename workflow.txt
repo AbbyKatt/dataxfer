@@ -25,8 +25,11 @@ class WorkFlow():
         self.futures=None
         self.WorkFlowManagerThread=None
         self.threadpoolsize=threadpoolsize
-        self.RunLevel=0
+        self.RunLevel=1
         self.Terminated=False
+
+    def GetWorkFlowKey(self):
+        return f"{self.environment}:{self.testtype}/{self.component}"
 
     def Terminate(self):
         #Shutdown threadpool + main thread
@@ -44,11 +47,23 @@ class WorkFlow():
             batchtasks.append(step.to_json())
         return batchtasks
 
+    def GetBatchTaskStats(self):
+        tasks,running,complete,failed=0,0,0,0
+        tasks=len(self.tests)
+        for step in self.tests:
+            if step.status=="Running":
+                running+=1
+            elif step.status=="Complete":
+                complete+=1
+            elif step.status=="Error":
+                failed+=1
+        return tasks,running,complete,failed
+
     def BuildTestBatchFromTemplate(self,template:list,initializerOnly=False):
         try:
             compiler=WorkFlow_Compiler(self.environment,self.testtype,self.component,self.params)
-            self.tests=compiler.Build(template)
-            self.status="Queued"
+            self.tests=compiler.Build(template,initializerOnly)
+            self.status="Built"
             self.message=""
             return True,""
         except Exception as e:
@@ -79,6 +94,7 @@ class WorkFlow():
         try:
             step.status="Running"
             step.message=""
+            step.StartTimer()
             print(f"WorkFlowManager:__threadRunBatchStep: Running task [{step.name}]")
             sql=self.SubstituteParams(step.ExecuteSQL)
             print(f"WorkFlowManager:__threadRunBatchStep: Running in project { self.environment } the SQL: [{sql}]")
@@ -86,16 +102,19 @@ class WorkFlow():
             print(f"WorkFlowManager:__threadRunBatchStep: Finished task [{step.name}]")
             step.status="Complete"
             step.message=""
+            step.StopTimer()
             return
         except Exception as e:
             print(f"WorkFlowManager:__threadRunBatchStep: Error running task [{step.name}]")
             print(str(e))
             step.status="Error"
             step.message=str(e)
+            step.StopTimer()
             return
 
     def __MultiThreadExecute(self,tasks):
         #Create a threadpool for our batch
+        print(f"WorkFlowManager:__MultiThreadExecute: Creating threadpool with {int(self.threadpoolsize)} threads")
         self.ThreadPool=concurrent.futures.ThreadPoolExecutor(max_workers=self.threadpoolsize)
         self.futures=[]
         print("Queueing tasks")
@@ -132,6 +151,7 @@ class WorkFlow():
             self.status="Error"
             self.message=message
             return
+        self.status="Running"
         print(f"WorkFlowManager:__ManagerThreadRun: WorkFlow JSON Compiled into {len(self.tests)} steps")
 
         #Replace first step with initializer
@@ -150,6 +170,7 @@ class WorkFlow():
             self.RunLevel+=1
             tasksToRun=self.GetTasksForRunLevel(self.RunLevel)
 
+        self.status="Complete"
         print(f"WorkFlowManager:__ManagerThreadRun: End of Thread [{self.name}]") 
         
     def Start(self):

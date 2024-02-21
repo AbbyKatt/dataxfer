@@ -1,4 +1,7 @@
 #Batch step -> actual step in the workflow for a batch
+import datetime
+
+
 class BatchStep:
 
     def __init__(self,name,runtier=0,ExecuteSQL="",ProjectID=""):
@@ -9,6 +12,27 @@ class BatchStep:
         self.ExecuteSQL=ExecuteSQL
         self.ProjectID=ProjectID
 
-    def to_json(self):
-        return {"name":self.name,"status":self.status,"message":self.message,"runtier":self.runtier,"ExecuteSQL":self.ExecuteSQL,"ProjectID":self.ProjectID}
+        #Job stats
+        self.JobStartTime=None
+        self.JobEndTime=None
+        self.RunTime=None
 
+    def to_json(self):
+        return {"name":self.name,
+                "status":self.status,
+                "jobstarttime":self.JobStartTime if self.JobStartTime is None else self.JobStartTime.strftime("%Y-%m-%d %H:%M:%S"),
+                "jobendtime":self.JobEndTime if self.JobEndTime is None else self.JobEndTime.strftime("%Y-%m-%d %H:%M:%S"),
+                "job_time":"" if self.RunTime is None else f"{self.RunTime.seconds//60}m {self.RunTime.seconds%60}s",
+                #"runtime":"" if self.RunTime is None else str(self.RunTime),
+                "message":self.message}
+
+    def StartTimer(self):
+        self.JobStartTime=datetime.datetime.now()
+
+    def StopTimer(self):
+        self.JobEndTime=datetime.datetime.now()
+        self.RunTime=self.JobEndTime-self.JobStartTime
+
+    def UpdateTime(self):
+        self.RunTime=datetime.datetime.now()-self.JobStartTime
+    

@@ -1,9 +1,10 @@
 import json
 import pytest
-from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus
+from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus,get_tests_for_env,get_environment_usage,get_running_workflows
 from config import TemplateStep
 from batch_step import BatchStep
 from workflow_compiler import WorkFlow_Compiler
+import time
 
 #---------------------------------------------------------------------------------------------------
 #Test Config
@@ -36,6 +37,15 @@ def test_gettesttypes():
     if showResults:
         print(ret)
     assert len(ret)>0, "Expected gettesttypes to return some test types"
+
+def test_get_tests_for_env():
+    # Testing get_tests_for_env
+    print(f"Testing get_tests_for_env")
+    ret=json.loads(get_tests_for_env("datawx"))
+    if showResults:
+        print(ret)
+    assert type(ret)==dict, "Expected get_tests_for_env to return some tests"
+    assert "Component" in ret, "Expected get_tests_for_env to return some tests"
 
 #---------------------------------------------------------------------------------------------------
 # WorkFlow Compiler tests
@@ -95,7 +105,7 @@ def test_startNonExistantJob():
 @pytest.mark.dependency()
 def test_startNormalJob():
     print(f"Testing startNormalJob")
-    ret=run_testworkflow("datawx","Data Compare","RAFT_UNIT_TEST",{})
+    ret=run_testworkflow("datawx","CMPR","RAFT_UNIT_TEST",32)
     if showResults:
         print(ret)
     assert ret[0]==True, "Expected startNormalJob to return true"
@@ -103,7 +113,7 @@ def test_startNormalJob():
 @pytest.mark.dependency(depends=["test_startNormalJob"])
 def test_startDupeJob():
     print(f"Testing test_startDupeJob")
-    ret=run_testworkflow("datawx","Data Compare","RAFT_UNIT_TEST",{})
+    ret=run_testworkflow("datawx","Data Compare","RAFT_UNIT_TEST",32)
     if showResults:
         print(ret)
     assert ret[0]==False, "Expected startDupeJob to return false"
@@ -113,25 +123,39 @@ def test_startDupeJob():
 #---------------------------------------------------------------------------------------------------
 
 def test_getworkflowstatus():
-
-    #Allow the workflow to load! - BigQuery query takes about 6 seconds
-    import time
-    time.sleep(10)
-
-    # Testing getworkflowstatus
-    print(f"Testing getworkflowstatus")
-    ret=get_workflow_batchstatus("datawx","Data Compare","RAFT_UNIT_TEST")
+    ret=get_workflow_batchstatus("datawx","CMPR","RAFT_UNIT_TEST")
     print("---------------------------------------------------------------------------------------------------")
     print("Batch Status:")
     print("---------------------------------------------------------------------------------------------------")
-    for stat in ret:
-        print(f"Name: {stat['name']}, Status: {stat['status']}")
-    print("\n\n")
+    if type(ret) is str:
+        print(f"Not Found Error Status: {ret} ")
+    else:
+        for stat in ret:
+            print(stat)
+            print("\n\n")
+            assert type(ret) is list, f"Expected getworkflowstatus to return a list of statuses Mode {message}"
+            assert len(ret)>0, f"Expected getworkflowstatus to return some status Mode {message}"
+            for step in ret:
+                assert type(step) is dict, f"Expected getworkflowstatus to return a list of statuses Mode {message}"
 
-    assert type(ret) is list, "Expected getworkflowstatus to return a list of statuses"
-    assert len(ret)>0, "Expected getworkflowstatus to return some status"
-    for step in ret:
-        assert type(step) is dict, "Expected getworkflowstatus to return a list of statuses"
+def test_getusagestats():
+    # Testing getusagestats
+    print(f"Testing getusagestats")
+    ret=get_environment_usage("datawx")
+    if showResults:
+        print(ret)
+    assert type(ret) is dict, "Expected getusagestats to return a dict of stats"
+    assert "RunningQueries" in ret, "Expected terminate to return a dict with RunningQueries"
+    assert "RunningBatches" in ret, "Expected terminate to return a dict with RunningBatches"
+    assert "RunningWorkFlows" in ret, "Expected terminate to return a dict with RunningWorkFlows"
+
+def test_GetRunningWorkFlows():
+    # Testing GetRunningWorkFlows
+    print(f"Testing GetRunningWorkFlows")
+    ret=get_running_workflows("datawx")
+    if showResults:
+        print(ret)
+    assert type(ret) is list, "Expected GetRunningWorkFlows to return a list of running workflows"
 
 #---------------------------------------------------------------------------------------------------
 # Terminate/Cleanup
@@ -158,8 +182,9 @@ if __name__ == "__main__":
     print("Config Tests")
     print("--------------------------------------------------------------------")
     test_loadconfig()
-    # test_getenvironments()
-    # test_gettesttypes()
+    test_getenvironments()
+    test_gettesttypes()
+    test_get_tests_for_env()
     # print("--------------------------------------------------------------------")
     # print("\n\n")
 
@@ -182,9 +207,11 @@ if __name__ == "__main__":
     # test_startDupeJob()
     
     while True:
-        import time
         time.sleep(4)
         test_getworkflowstatus()
+        #test_GetRunningWorkFlows()
+    
+    
 
     print("--------------------------------------------------------------------")
     print("\n\n")
