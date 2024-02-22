@@ -1,9 +1,10 @@
 import json
 import pytest
-from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus,get_tests_for_env,get_environment_usage,get_running_workflows
+from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus,get_tests_for_env,get_environment_usage,get_running_workflows,enqueue_testworkflows,workflow_scheduler
 from config import TemplateStep
 from batch_step import BatchStep
 from workflow_compiler import WorkFlow_Compiler
+from workflow_manager import WorkFlowManager
 import time
 
 #---------------------------------------------------------------------------------------------------
@@ -118,6 +119,14 @@ def test_startDupeJob():
         print(ret)
     assert ret[0]==False, "Expected startDupeJob to return false"
 
+def test_queueWorkFlows():
+    print(f"Testing queueWorkFlows")
+    wf1=WorkFlowManager.GetQueuedWorkFlowDict("datawx","CMPR","RAFT_UNIT_TEST",{})
+    wf2=WorkFlowManager.GetQueuedWorkFlowDict("datawx","CMPR","HBUK_FIN_DATAHUB_COMMN_INTRA",{})
+    worksflows=[wf1,wf2]
+    passed,message=enqueue_testworkflows(worksflows,32)
+    assert passed, f"Expected queueWorkFlows to return True, got {message}"
+
 #---------------------------------------------------------------------------------------------------
 # WorkFlow Status
 #---------------------------------------------------------------------------------------------------
@@ -168,6 +177,15 @@ def test_terminate():
         print(ret)
     assert ret==True, "Expected terminate to return True"
 
+
+def test_workFlowScheduler():
+    print(f"Testing workFlowScheduler")
+    ret,msg=workflow_scheduler()
+    if showResults:
+        print(f"WorkFlowScheduler: {ret} {msg}")
+    assert ret==True, "Expected workFlowScheduler to return True"
+   
+
 ##'RAFT_CONFIG.RAFT_UNIT_TEST
 
 #---------------------------------------------------------------------------------------------------
@@ -186,7 +204,7 @@ if __name__ == "__main__":
     test_gettesttypes()
     test_get_tests_for_env()
     # print("--------------------------------------------------------------------")
-    # print("\n\n")
+    print("\n\n")
 
     # #Workflow Compiler test
     # print("--------------------------------------------------------------------")
@@ -203,13 +221,16 @@ if __name__ == "__main__":
     print("Workflow Run Tests")
     print("--------------------------------------------------------------------")
     # test_startNonExistantJob()
-    test_startNormalJob()
+    #test_startNormalJob()
     # test_startDupeJob()
+    test_queueWorkFlows()
     
     while True:
         time.sleep(4)
-        test_getworkflowstatus()
-        #test_GetRunningWorkFlows()
+        test_workFlowScheduler()
+        #test_getworkflowstatus()
+        test_GetRunningWorkFlows()
+        
     
     
 

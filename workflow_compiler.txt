@@ -43,7 +43,7 @@ class WorkFlow_Compiler:
             rowDict = row.to_dict()
             stepFunction=template.function
             stepFunction=self.SubstituetParams(stepFunction,rowDict)
-            step=BatchStep(template.name,runTier,stepFunction)
+            step=BatchStep(self.SubstituetParams(template.name,rowDict),runTier,stepFunction)
             tasks.append(step)
         return tasks
 

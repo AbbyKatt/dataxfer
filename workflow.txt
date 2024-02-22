@@ -17,7 +17,7 @@ class WorkFlow():
         self.component=component
         self.params=params
         self.tests=[]
-        self.status="Initialized"
+        self.status="Scheduled"
         self.message=""
 
         #Threading
@@ -105,7 +105,7 @@ class WorkFlow():
             step.StopTimer()
             return
         except Exception as e:
-            print(f"WorkFlowManager:__threadRunBatchStep: Error running task [{step.name}]")
+            print(f"\n\n***EXCEPTION***WorkFlowManager:__threadRunBatchStep: Error running task [{step.name}] error: {str(e)}\n\n")
             print(str(e))
             step.status="Error"
             step.message=str(e)
@@ -160,8 +160,6 @@ class WorkFlow():
         #Main batch loop
         tasksToRun=self.GetTasksForRunLevel(self.RunLevel)
         while len(tasksToRun)>0 and not self.Terminated:
-            print(f"WorkFlowManager:__ManagerThreadRun: Running {len(tasksToRun)} tasks at runlevel {self.RunLevel}")
-
             #Batch run all tasks in this tier            
             self.__MultiThreadExecute(tasksToRun)
             # for task in tasksToRun:
@@ -174,10 +172,15 @@ class WorkFlow():
         print(f"WorkFlowManager:__ManagerThreadRun: End of Thread [{self.name}]") 
         
     def Start(self):
+        #dump stats on started task
+        print(f"WorkFlowManager:Start: Starting workflow [{self.name}] in environment [{self.environment}] with testtype [{self.testtype}] and component [{self.component}] and threadpoolsize [{self.threadpoolsize}]")
+
         if not self.workFlowManager.config.testTypeExists(self.testtype):
             return False,f"Test type [{self.testtype}] does not exist in config"
         else:
             #Run workflow manager thread
+            self.status="Starting"
+            self.message=""
             self.WorkFlowManagerThread = threading.Thread(target=self.__ManagerThreadRun)
             self.WorkFlowManagerThread.start()
             return True,"Workflow Thread Started..."

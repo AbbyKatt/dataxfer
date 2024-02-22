@@ -1,3 +1,4 @@
+import time
 from config import Config
 from workflow_manager import WorkFlowManager
 from sqlfunctions import GetTestComponentsForEnvironment
@@ -56,6 +57,15 @@ def run_testworkflow(environment: str,testtype: str,component: str,threadpoolsiz
     global gWorkFlowManager
     return gWorkFlowManager.RunWorkFlow(environment,testtype,component,{},int(threadpoolsize))
 
+class WorkFlowRequest(BaseModel):
+    workflows: list
+    threadpoolsize: int
+
+@app.post("/enqueue-testworkflows")
+def enqueue_testworkflows(request: WorkFlowRequest):
+    global gWorkFlowManager
+    return gWorkFlowManager.EnQueueWorkFlows(request.workflows,request.threadpoolsize)
+
 @app.get("/get-environment-usage")
 def get_environment_usage(environment: str):
     global gWorkFlowManager
@@ -77,6 +87,14 @@ def get_workflow_batchstatus(environment: str,testtype: str,component: str):
     global gWorkFlowManager
     return gWorkFlowManager.GetWorkflowBatchStatus(environment,testtype,component)
 
+#---------------------------------------------------------------------------------------------------
+#Workflow Scheduler
+#---------------------------------------------------------------------------------------------------
+
+#Automatically run workflows when one finishes
+def workflow_scheduler():
+    global gWorkFlowManager
+    return gWorkFlowManager.RunScheduler()
 
 #---------------------------------------------------------------------------------------------------
 #Main Application Loop
@@ -94,12 +112,10 @@ if __name__ == "__main__":
         print("Usage: job_manager.py <config file>")
         sys.exit(1)
 
+    #Launch workflows as slots become free
     while True:
-        print("Enter 'exit' to exit")
-        cmd=input(">")
-        if cmd=="exit":
-            terminate()
-            break
-        else:
-            print("Unknown command")
-            continue
+        time.sleep(2)
+        workflow_scheduler()
+
+        
+    
