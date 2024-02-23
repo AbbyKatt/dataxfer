@@ -1,5 +1,6 @@
 #BiqEuery Helper functions
 import pandas as pd
+from google.cloud import bigquery
 
 def GetTestComponentsForEnvironment(env):
     SQL="""select Component,
@@ -13,3 +14,26 @@ def GetTestComponentsForEnvironment(env):
             from RAFT_CONFIG.RAFT_MASTER_CONFIG where Active_flag='Y'"""
     df=pd.read_gbq(SQL,project_id=env)
     return df
+
+def CreateBQDataSet(project_id,dataset,timeOut=72,location="EU"):
+        try:
+                # Set your project ID and initialize a client
+                client = bigquery.Client(project=project_id)
+                dataset_id = f"{project_id}.{dataset}"
+                dataset_ref = bigquery.DatasetReference(project_id, dataset)
+                dataset = bigquery.Dataset(dataset_ref)
+
+                # Set the default table expiration (in milliseconds)
+                one_day_ms = timeOut * 60 * 60 * 1000  
+                dataset.default_table_expiration_ms = one_day_ms
+
+                # Set the location
+                dataset.location = location
+
+                # Create the dataset
+                dataset = client.create_dataset(dataset, timeout=30)
+                print(f"Created dataset {dataset.dataset_id}")
+                return True,""
+        except Exception as e:
+                print(f"Error creating dataset {dataset_id} - {e}")
+                return False,str(e)

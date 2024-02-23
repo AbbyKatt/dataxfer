@@ -1,11 +1,13 @@
 #WorkFlow - represents a single workflow consisting of a sequence of tests
 import threading
-
 import pandas_gbq
 from config import TemplateStep
 from workflow_compiler import WorkFlow_Compiler
 import concurrent.futures
 from batch_step import BatchStep
+from sqlfunctions import CreateBQDataSet
+import uuid
+
 
 class WorkFlow():
 
@@ -27,6 +29,11 @@ class WorkFlow():
         self.threadpoolsize=threadpoolsize
         self.RunLevel=1
         self.Terminated=False
+
+        #Generate UUID as a string
+        luuid=str(uuid.uuid4())
+        luuid=luuid.replace("-","")
+        self.temporary_dataset_name=f"RAFT_TEMP_{self.testtype}_{self.component}_{luuid}"
 
     def GetWorkFlowKey(self):
         return f"{self.environment}:{self.testtype}/{self.component}"
@@ -61,7 +68,7 @@ class WorkFlow():
 
     def BuildTestBatchFromTemplate(self,template:list,initializerOnly=False):
         try:
-            compiler=WorkFlow_Compiler(self.environment,self.testtype,self.component,self.params)
+            compiler=WorkFlow_Compiler(self.environment,self.testtype,self.component,self.params,self.temporary_dataset_name)
             self.tests=compiler.Build(template,initializerOnly)
             self.status="Built"
             self.message=""
@@ -131,13 +138,21 @@ class WorkFlow():
     def __ManagerThreadRun(self):
         print(f"WorkFlowManager:__ManagerThreadRun: Starting workflow [{self.name}]")
         
+        #Create temporary dataset
+        self.status="Initializing"
+        print(f"WorkFlowManager:__ManagerThreadRun: Creating temporary dataset [{self.temporary_dataset_name}]")
+        passed,message=CreateBQDataSet(self.environment,self.temporary_dataset_name)
+        if not passed:
+            self.status="Error"
+            self.message="Error creating temporary dataset: " + message
+            return 
+
         #Set up ephemeral batch with Initializer only
         passed,message=self.BuildTestBatchFromTemplate(self.workFlowManager.config.getTestTemplate(self.testtype),True)
         if not passed:
             self.status="Error"
             self.message=message
             return
-        self.status="Initializing"
 
         #Run initializer step in main worker thread
         print(f"WorkFlowManager:__ManagerThreadRun: Running initializer step")

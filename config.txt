@@ -7,6 +7,7 @@ class TemplateStep():
         self.multiplicity=multiplicity
         self.selectsql=selectsql
         self.function=function
+        self.tablexpirtation=72
 
     def to_json(self):
         return {"name":self.name,"multiplicity":self.multiplicity,"selectsql":self.selectsql,"function":self.function}

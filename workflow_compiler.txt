@@ -5,11 +5,12 @@ from batch_step import BatchStep
 
 class WorkFlow_Compiler:
 
-    def __init__(self,projectID:str,testType:str,component:str,params:dict):
+    def __init__(self,projectID:str,testType:str,component:str,params:dict,temporaryDataset:str):
         self.projectID=projectID
         self.testType=testType
         self.component=component
         self.params=params
+        self.temporaryDataset=temporaryDataset
 
     def SubstituetParams(self,sql:str,rowParams={}):
         #Top level and row level params
@@ -22,12 +23,13 @@ class WorkFlow_Compiler:
         sql=sql.replace("$ProjectID",self.projectID)
         sql=sql.replace("$TestType",self.testType)
         sql=sql.replace("$Component",self.component)
+        sql=sql.replace("$TempDataset",self.temporaryDataset)
         return sql
 
     def BuildSingle(self,template:TemplateStep,runTier:int):
         print(f"Building single step [{template.name}]")
         functionStr=self.SubstituetParams(template.function)
-        step=BatchStep(template.name,runTier,functionStr)
+        step=BatchStep(self.SubstituetParams(template.name),runTier,functionStr)
         print(f"Step: {step.to_json()}")
         return [step]
         
@@ -38,7 +40,7 @@ class WorkFlow_Compiler:
         selectSQL=self.SubstituetParams(template.selectsql)
         print(f"Running Select SQL: {selectSQL}")
 
-        df=pd.read_gbq(selectSQL,project_id='datawx')
+        df=pd.read_gbq(selectSQL,project_id=self.projectID)
         for index, row in df.iterrows():
             rowDict = row.to_dict()
             stepFunction=template.function

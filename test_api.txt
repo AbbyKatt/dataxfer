@@ -1,6 +1,6 @@
 import json
 import pytest
-from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus,get_tests_for_env,get_environment_usage,get_running_workflows,enqueue_testworkflows,workflow_scheduler
+from testsuite_man import LoadConfig,get_environments,get_test_types,run_testworkflow,GetConfig,terminate,get_workflow_batchstatus,get_tests_for_env,get_environment_usage,get_running_workflows,enqueue_testworkflows,workflow_scheduler,WorkFlowRequest
 from config import TemplateStep
 from batch_step import BatchStep
 from workflow_compiler import WorkFlow_Compiler
@@ -124,7 +124,8 @@ def test_queueWorkFlows():
     wf1=WorkFlowManager.GetQueuedWorkFlowDict("datawx","CMPR","RAFT_UNIT_TEST",{})
     wf2=WorkFlowManager.GetQueuedWorkFlowDict("datawx","CMPR","HBUK_FIN_DATAHUB_COMMN_INTRA",{})
     worksflows=[wf1,wf2]
-    passed,message=enqueue_testworkflows(worksflows,32)
+    wfReq=WorkFlowRequest(workflows=worksflows,threadpoolsize=32)
+    passed,message=enqueue_testworkflows(wfReq)
     assert passed, f"Expected queueWorkFlows to return True, got {message}"
 
 #---------------------------------------------------------------------------------------------------
@@ -228,8 +229,8 @@ if __name__ == "__main__":
     while True:
         time.sleep(4)
         test_workFlowScheduler()
-        #test_getworkflowstatus()
-        test_GetRunningWorkFlows()
+        test_getworkflowstatus()
+        #test_GetRunningWorkFlows()
         
     
     
