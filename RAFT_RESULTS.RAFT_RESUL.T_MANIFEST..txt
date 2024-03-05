@@ -1,0 +1,25 @@
+Table: RAFT_RESULTS.RAFT_RESULT_MANIFEST
+
+Component                             string
+Run_User                              string
+Run_Date                              string
+Run_group                             string
+Sub_run_group                         string
+Site                                  string
+Result_Type                           string
+Base_DataSet                          string
+Testing_DataSet                       string
+Result_DataSet                        string
+DATA_CMPR_Detailed                    string
+DATA_CMPR_Error                       string
+DATA_CMPR_Metrics                     string
+DATA_CMPR_Summary                     string
+METADATA_CMPR_Deviations             string
+METADATA_CMPR_RowCount_Deviations    string
+REFDATA_CMPR_Detailed                string
+REFDATA_CMPR_Summary                 string
+REFDATA_CMPR_Metrics                 string
+REFDATA_CMPR_Error                   string
+REFDATA_CMPR_RowCount_Deviations     string
+AGG_CMPR_RESULT_DATASET               string
+dtype: string
