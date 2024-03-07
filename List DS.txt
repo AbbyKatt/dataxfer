@@ -1,0 +1,17 @@
+from google.cloud import bigquery
+
+def list_tables(dataset_id):
+    # Construct a BigQuery client object.
+    client = bigquery.Client()
+
+    # List all tables in the specified dataset
+    tables = client.list_tables(dataset_id)
+
+    # Print names of all tables in the dataset
+    print(f"Tables in dataset {dataset_id}:")
+    for table in tables:
+        print(table.table_id)
+
+# Specify your BigQuery dataset ID here (e.g., "your-project.your_dataset")
+dataset_id = 'your-project.your_dataset'
+list_tables(dataset_id)
