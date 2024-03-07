@@ -1,0 +1,438 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import datetime
+import requests
+from st_aggrid import AgGrid, GridOptionsBuilder
+from urllib.parse import quote
+
+#API - interface, move to external library-------------------------------------------------------------------
+API_URL = "http://localhost:4040"
+
+@st.cache_data
+def get_environments():
+    response = requests.get(API_URL + "/get-environments")
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Failed to retrieve environments. Status code: {response.status_code}")
+        return []
+
+#This function needs to be moved back into API (local short circuit for now)
+@st.cache_data
+def LoadSQLIntoDataset(environment,sql):
+    df=pd.read_gbq(sql,project_id=environment)
+    return df
+
+#-----------------------------------------------------------------------------------------------------------
+#SQL Business Logic - to be moved to class
+def sqlGetAllComponents(tableName="RAFT_RESULTS.RAFT_RESULT_MANIFEST"):
+    sql=f"SELECT * FROM {tableName}"
+    return sql
+
+def sqlGetErrors(resultDataset,tableName):
+    sql=f"SELECT * FROM {resultDataset}.{tableName}"
+    return sql
+
+def sqlGetTableErrorCount(resultDataset,tableName):
+    sql=f"""SELECT
+            WrappedQuery.Table_name,
+            WrappedQuery.FACT_Error_Count,
+            WrappedQuery.Dimension_Error_Count,
+            (WrappedQuery.FACT_Error_Count + WrappedQuery.Dimension_Error_Count) AS Total_Error_Count
+            FROM (
+            SELECT
+                DimensionErrors.Table_name,
+                IFNULL(FactErrors.FACT_Error_Count, 0) AS FACT_Error_Count,
+                IFNULL(DimensionErrors.Dimension_Error_Count, 0) AS Dimension_Error_Count
+            FROM (
+                SELECT Table_name,
+                count(*) AS Dimension_Error_Count
+                FROM {resultDataset}.{tableName}
+                WHERE Data_type = "STRING"
+                GROUP BY Table_name
+            ) DimensionErrors
+            FULL OUTER JOIN (
+                SELECT Table_name,
+                count(*) AS FACT_Error_Count
+                FROM {resultDataset}.{tableName}
+                WHERE Data_type != "STRING"
+                GROUP BY Table_name
+            ) FactErrors
+            ON DimensionErrors.Table_name = FactErrors.Table_name
+            ) WrappedQuery
+            ORDER by Total_Error_Count desc
+            """
+    return sql
+
+def sqlAggregateTableFieldErrors(resultDataset,detailsTable,reportTable):
+    sql=f"""SELECT Column_Name,
+            --Data_type,
+            sum(abs(IFNULL(Value_DIFF, 0))) as Absolute_Difference,
+            avg(IFNULL(Pct_DIFF, 0)) as Average_Difference,
+            count(*) as Error_Count
+            FROM {resultDataset}.{detailsTable}
+            WHERE Table_name = '{reportTable}'
+            GROUP BY Column_Name, Data_type
+            ORDER BY Error_Count DESC
+            """
+    return sql
+
+def sqlGetErrorFieldValues(resultDataset,detailsTable,reportTable,fieldName,histField):
+    sql=f"""select {histField},
+    count(*) as ErrorCount
+    from {resultDataset}.{detailsTable}
+    where Table_name = "{reportTable}"
+    and Column_Name ="{fieldName}"
+    group by {histField}
+    order by ErrorCount desc
+    """
+    return sql
+    
+
+#-----------------------------------------------------------------------------------------------------------
+# View State Management
+#-----------------------------------------------------------------------------------------------------------
+#Defaults
+showComponentSelector=True
+selectedComponent=""
+selectedTable=""
+showTotals=False
+fieldInspector=False
+showFieldDetails=False
+
+#Reporting Tables
+resultDataset=""
+detailTable=""
+errorTable=""
+metricsTable=""
+summaryTable=""
+
+#Session
+if "ShowComponentSelector" in st.session_state:
+    showComponentSelector=st.session_state.ShowComponentSelector
+    selectedComponent=st.session_state.selectedComponent
+
+if "SelectedTable" in st.session_state:
+    selectedTable=st.session_state.SelectedTable
+
+if "ShowTotals" in st.session_state:
+    showTotals=st.session_state.ShowTotals
+
+if "resultDataset" in st.session_state:
+    resultDataset=st.session_state.resultDataset
+    detailTable=st.session_state.detailTable
+    errorTable=st.session_state.errorTable
+    metricsTable=st.session_state.metricsTable
+    summaryTable=st.session_state.summaryTable
+
+if "FieldInspector" in st.session_state:
+    fieldInspector=st.session_state.FieldInspector
+
+#-----------------------------------------------------------------------------------------------------------
+#Header/Environment Selection   
+#-----------------------------------------------------------------------------------------------------------
+st.set_page_config(layout="wide")
+col1,col2,col3=st.columns([1,1,1])
+with col2:
+    st.subheader("DATA CMPR Results")
+
+col1,col2=st.columns([1,1])
+with col1:
+    environment=st.selectbox("Select Environment", get_environments())
+with col2:
+    st.markdown("<br>",unsafe_allow_html=True)
+    st.info("Viewing Results in [RAFT_REFULTS]")
+
+st.markdown("---")
+
+#-----------------------------------------------------------------------------------------------------------
+# Show Current Component is Hidden, let uer show it again
+if not showComponentSelector:
+    col1,col2=st.columns([4,1])
+    with col1:
+        st.info(f"Currently viewing [{selectedComponent}]")
+    with col2:
+        if st.button("Show Component Selector"):
+            st.session_state.ShowComponentSelector=True
+            st.session_state.ShowTotals=False
+            st.rerun()
+
+
+
+#-----------------------------------------------------------------------------------------------------------
+#Component Selector/Filtering
+
+if showComponentSelector:
+    
+    #Get all results
+    allTestResults=LoadSQLIntoDataset(environment,sqlGetAllComponents())
+
+    #Make a subset for the grid
+    subSetColumns=["Component",
+          "Run_User",
+          "Run_Date",
+          "Run_group",
+          "Sub_run_group",
+          "Site"
+    ]
+    
+    #Setup filters
+    gridViewDF=allTestResults[allTestResults["Result_Type"]=="DATA_CMPR"]
+    filtRunUsers=gridViewDF["Run_User"].unique()
+    filtRunGroups=gridViewDF["Run_group"].unique()
+    filtSubRunGroups=gridViewDF["Sub_run_group"].unique()
+    filtSites=gridViewDF["Site"].unique()
+    col1,col2=st.columns([1,1])
+    with col1:
+        runUser=st.multiselect("Run User",filtRunUsers)
+        runGroup=st.multiselect("Run Group",filtRunGroups)
+    with col2:
+        subRunGroup=st.multiselect("Sub Run Group",filtSubRunGroups)
+        site=st.multiselect("Site",filtSites)
+
+    #Apply filters
+    if len(runUser)>0:
+        gridViewDF=gridViewDF[gridViewDF["Run_User"].isin(runUser)]
+    if len(runGroup)>0:
+        gridViewDF=gridViewDF[gridViewDF["Run_group"].isin(runGroup)]
+    if len(subRunGroup)>0:
+        gridViewDF=gridViewDF[gridViewDF["Sub_run_group"].isin(subRunGroup)]
+    if len(site)>0:
+        gridViewDF=gridViewDF[gridViewDF["Site"].isin(site)]
+
+    #Limit to subset of columns
+    gridViewDFSubSet=gridViewDF[subSetColumns]
+
+    #if no records in grid, show message
+    if len(gridViewDFSubSet)==0:
+        st.error("No records found - try adjusting filters.")
+    else:
+        #Aggrid
+        gb = GridOptionsBuilder.from_dataframe(gridViewDFSubSet)
+        gb.configure_selection('single')  # Change to 'multiple' for multi-row selection
+        gb.configure_grid_options(domLayout='autoHeight',sorted=True,sortModel=[{"colId": "Run_Date", "sort": "desc"}])
+        grid_options = gb.build()
+
+        # Fit columns on grid load
+        grid_response = AgGrid(
+            gridViewDFSubSet, 
+            gridOptions=grid_options, 
+            height=400, # Adjust height (in pixels)
+            fit_columns_on_grid_load=True,
+            
+        )
+
+    st.markdown("---")
+
+    #Get values when user selects row
+    selected_rows = grid_response['selected_rows']
+    if len(selected_rows)>0:
+
+        #Get Index so we can fetch from the fully-featured dataframe
+        selectedComponent=selected_rows[0]["Component"]
+        index=selected_rows[0]["_selectedRowNodeInfo"]["nodeRowIndex"]
+        resultDataset=gridViewDF.iloc[[index]]["Result_DataSet"].values[0]
+        errorTable=gridViewDF.iloc[[index]]["DATA_CMPR_Error"].values[0]
+        detailTable=gridViewDF.iloc[[index]]["DATA_CMPR_Detailed"].values[0]
+        metricsTable=gridViewDF.iloc[[index]]["DATA_CMPR_Metrics"].values[0]
+        summaryTable=gridViewDF.iloc[[index]]["DATA_CMPR_Summary"].values[0]
+        
+        #Error reporting - run query to get all error
+        errorSQL=sqlGetErrors(resultDataset,errorTable)
+        errorDF=LoadSQLIntoDataset(environment,errorSQL)
+
+        #*********************************************************************************************************************
+        # Toggle View State (Show Totals, Hide Errors, Save Reporting Tables)
+        #*********************************************************************************************************************
+        showTotals=True
+        showErrorViewer=False
+        st.session_state.resultDataset=resultDataset
+        st.session_state.detailTable=detailTable
+        st.session_state.errorTable=errorTable
+        st.session_state.metricsTable=metricsTable
+        st.session_state.summaryTable=summaryTable
+
+        if len(errorDF)==0:
+            st.info("No errors found.")
+        else:
+            col1,col2=st.columns([5,1])
+            with col1:
+                st.error(f"There were {len(errorDF)} errors found, running this batch.")
+            with col2:
+                showErrorViewer=st.button("View Errors")
+
+        st.markdown("---")
+
+        if showErrorViewer:
+            st.write(errorDF)
+            st.markdown("---")
+
+
+    
+        #---------------------------------------------------------------------------------------------------------------------
+        # Error Totals SubSection
+        #---------------------------------------------------------------------------------------------------------------------
+if showTotals:
+
+    col1,col2=st.columns([1,1])
+    with col1:
+        #Data
+        errorCountSQL=sqlGetTableErrorCount(resultDataset,detailTable)
+        errorCountDF=LoadSQLIntoDataset(environment,errorCountSQL)
+        plotDF=errorCountDF[["Table_name","Dimension_Error_Count","FACT_Error_Count"]]
+
+        plotDF = plotDF.head(10)
+
+        # Set seaborn theme
+        sns.set_theme(style="darkgrid")
+
+        # Create the figure and axes
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+        # Plot using pandas plotting, but use seaborn's color palette for consistency
+        # Generate a list of colors from a seaborn palette
+        palette = sns.color_palette("pastel", n_colors=plotDF.shape[1])
+
+        # Plot with pandas and apply the color palette
+        plotDF.plot(kind='bar', stacked=True, ax=ax, color=palette)
+
+        # Set custom x-tick labels
+        ax.set_xticklabels(errorCountDF["Table_name"], rotation=20)
+
+        # Display the plot in Streamlit
+        st.pyplot(fig)
+        
+    with col2:
+        st.subheader("Table Inspector")
+        dropDownMode=st.selectbox("Display Mode",["Absolute Error Counts","Record Count Normalized"])
+
+        #create agggrid for errorCountDF
+        gb = GridOptionsBuilder.from_dataframe(errorCountDF)
+        gb.configure_selection('single')
+        gb.configure_grid_options(domLayout='200px',sorted=True,sortModel=[{"colId": "Total_Error_Count", "sort": "desc"}])
+        grid_options = gb.build()
+
+        # Fit columns on grid load
+        grid_response = AgGrid(
+            errorCountDF, 
+            gridOptions=grid_options, 
+            height=350, # Adjust height (in pixels)
+            fit_columns_on_grid_load=True,
+            
+        )
+
+        #Get values when user selects row
+        selected_rows = grid_response['selected_rows']
+        if len(selected_rows)>0:
+            #st.write(selected_rows)
+            Table_name=selected_rows[0]["Table_name"]
+            
+            #*********************************************************************************************************************
+            #Save Session State - Table selected
+            #*********************************************************************************************************************
+            if st.button(f"Inspect Table [{Table_name}]"):
+                st.session_state.ShowComponentSelector=False
+                st.session_state.selectedComponent=selectedComponent
+                st.session_state.ShowTotals=True
+                st.session_state.FieldInspector=True                
+                st.session_state.SelectedTable=Table_name
+                st.rerun()
+
+    st.markdown("---")
+
+if fieldInspector:
+    st.subheader(f"Field Inspector - {selectedTable}")
+
+    col1,col2=st.columns([1,1])
+    with col1:
+        testSQL=sqlAggregateTableFieldErrors(resultDataset,detailTable,selectedTable)
+        FieldErrorDF=LoadSQLIntoDataset(environment,testSQL)
+
+        #Create agggrid for FieldErrorDF
+        gb = GridOptionsBuilder.from_dataframe(FieldErrorDF)
+        gb.configure_selection('single')
+        gb.configure_grid_options(domLayout='200px',sorted=True,sortModel=[{"colId": "Error_Count", "sort": "desc"}])
+        grid_options = gb.build()
+
+        #make columns size 200px
+        grid_options['defaultColDef']['width'] = 200
+
+        # Fit columns on grid load
+        grid_response = AgGrid(
+            FieldErrorDF, 
+            gridOptions=grid_options, 
+            height=575, # Adjust height (in pixels)
+            #sfit_columns_on_grid_load=True,
+            columns_auto_size_mode='force',
+        )
+
+        #Get values when user selects row
+        selected_rows = grid_response['selected_rows']
+        if len(selected_rows)>0:
+            Column_Name=selected_rows[0]["Column_Name"]
+            showFieldDetails=True
+
+
+    with col2:
+        yAxisField=st.selectbox("Sort Mode",["Error_Count","Absolute_Difference","Average_Difference"],index=0)
+
+        # Assuming FieldErrorDF and yAxisField are defined earlier in your code
+        # Sort and select the top 10 items
+        histPlotDS = FieldErrorDF.sort_values(by=yAxisField, ascending=False).head(7)
+
+        # Set the size of the figure and the theme
+        sns.set_theme(style="darkgrid")
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+        # Use seaborn's barplot for plotting
+        # Set the palette to "pastel" for rainbow pastel colors
+        sns.barplot(data=histPlotDS, x="Column_Name", y=yAxisField, palette="pastel", ax=ax)
+
+        # Rotate the x-tick labels for better readability
+        plt.xticks(rotation=20)
+
+        # Display the plot in Streamlit
+        st.pyplot(fig)
+
+    st.markdown("---")
+
+if showFieldDetails:
+    col1,col2=st.columns([1,1])
+    with col1:
+        histField=st.selectbox("Histogram Mode",["Actual_Value","Expected_Value"],index=0)
+        sql=sqlGetErrorFieldValues(resultDataset,detailTable,selectedTable,Column_Name,histField)
+        df=LoadSQLIntoDataset(environment,sql)
+        
+        #Make df into agggrid
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_selection('single')
+        gb.configure_grid_options(domLayout='200px',sorted=True,sortModel=[{"colId": "ErrorCount", "sort": "desc"}])
+        grid_options = gb.build()
+
+        #make columns size 200px
+        grid_options['defaultColDef']['width'] = 200
+
+        # Fit columns on grid load
+        grid_response = AgGrid(
+            df, 
+            gridOptions=grid_options, 
+            height=275, # Adjust height (in pixels)
+            #sfit_columns_on_grid_load=True,
+            columns_auto_size_mode='force',
+        )
+
+    st.markdown("---")
+
+
+
+    with col2:
+        #Seaborn bar plot
+        fig, ax = plt.subplots(figsize=(8, 4))
+        sns.barplot(data=df.head(10), x=histField, y="ErrorCount", palette="pastel", ax=ax)
+        plt.xticks(rotation=20)
+        st.pyplot(fig)
+
+
