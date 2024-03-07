@@ -1,0 +1,28 @@
+#Manifest Table
+Manifest=["Component",
+          "Run_User",
+          "Run_Date",
+          "Run_group",
+          "Sub_run_group",
+          "Site",
+          "Result_Type",
+          "Base_DataSet",
+          "Testing_DataSet",
+          "Result_DataSet",
+          
+          #Different Result Types
+          "DATA_CMPR_Detailed","DATA_CMPR_Error","DATA_CMPR_Metrics","DATA_CMPR_Summary",
+          "METADATA_CMPR_Deviations","METADATA_CMPR_RowCount_Deviations",
+          "REFDATA_CMPR_Detailed","REFDATA_CMPR_Summary","REFDATA_CMPR_Metrics","REFDATA_CMPR_Error","REFDATA_CMPR_RowCount_Deviations",
+          "AGG_CMPR_RESULT_DATASET"]
+		  
+		  
+#Upload Manifest CSV into a BigQuery table
+import pandas as pd
+manifestCSV="synthetic_data/manifest.csv"
+df=pd.read_csv(manifestCSV,sep=",")
+df.head()
+
+tableName="RAFT_RESULTS.RAFT_RESULT_MANIFEST"
+df.to_gbq(tableName,project_id="datawx",if_exists="replace")
+print("Table Uploaded to BigQuery")
