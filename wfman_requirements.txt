@@ -1,0 +1,6 @@
+pandas
+pandas-gbq
+fastapi
+uvicorn
+google-cloud-bigquery
+streamlit

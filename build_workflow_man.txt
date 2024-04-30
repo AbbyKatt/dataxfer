@@ -1,0 +1,1 @@
+docker build  -f src\testsuite_manager\Dockerfile_workflowman -t datawx/flowshift_jobman . 

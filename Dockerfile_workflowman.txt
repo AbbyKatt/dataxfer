@@ -1,0 +1,21 @@
+FROM python
+
+WORKDIR /usr/src/app
+
+COPY requirements.txt ./
+COPY ./src/testsuite_manager/ ./
+
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade google-cloud-bigquery
+RUN pip install --upgrade google-cloud-storage
+RUN pip install --upgrade google-cloud-logging
+RUN pip install --upgrade google-cloud-pubsub
+
+#pass system environment variables to the container
+ENV GOOGLE_APPLICATION_CREDENTIALS=/var/keys/application_default_credentials.json
+ENV POXY=${POXY}
+
+CMD [ "python3","-u", "testsuite_man.py","/var/keys/flowshift.json"]
+
+ 
