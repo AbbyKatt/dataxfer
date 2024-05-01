@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+
+  flowshiftworker:
+    image: datawx/flowshift_jobman
+    volumes:
+      - c:/temp/keys:/var/keys
+    restart: always
+    ports:
+      - "4123:4040"
+    networks:
+      - fs_network
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/var/keys/application_default_credentials.json
+    
+  flowshiftui:
+    image: datawx/flowshift_sldash
+    volumes:
+      - c:/temp/keys:/var/keys
+    restart: always
+    ports:
+      - "8501:8501"
+    networks:
+      - fs_network
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/var/keys/application_default_credentials.json
+  
+networks:
+  fs_network:
+    driver: bridge
