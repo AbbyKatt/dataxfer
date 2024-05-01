@@ -1,0 +1,1 @@
+docker build  -f src\SLDash\Dockerfile_sldash -t datawx/flowshift_sldash . 

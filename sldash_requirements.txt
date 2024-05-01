@@ -1,0 +1,9 @@
+pandas
+pandas-gbq
+fastapi
+uvicorn
+google-cloud-bigquery
+matplotlib
+seaborn
+streamlit
+streamlit-aggrid==0.3.4.post3
