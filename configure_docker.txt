@@ -1,0 +1,42 @@
+@echo off
+SETLOCAL
+
+:: Set the target directory variable
+set TARGET_DIR=C:\temp\keys
+
+:: Create the directory if it does not exist
+if not exist "%TARGET_DIR%" (
+    mkdir "%TARGET_DIR%"
+    if errorlevel 1 (
+        echo Failed to create directory at %TARGET_DIR%.
+        pause
+        exit /b 1
+    )
+)
+
+:: Copy Google application credentials file
+if defined GOOGLE_APPLICATION_CREDENTIALS (
+    copy "%GOOGLE_APPLICATION_CREDENTIALS%" "%TARGET_DIR%"
+    if errorlevel 1 (
+        echo Failed to copy credentials file to %TARGET_DIR%.
+        pause
+        exit /b 1
+    )
+) else (
+    echo GOOGLE_APPLICATION_CREDENTIALS environment variable is not set.
+    pause
+    exit /b 1
+)
+
+:: Copy flowshift.json to the target directory
+copy flowshift.json "%TARGET_DIR%"
+if errorlevel 1 (
+    echo Failed to copy flowshift.json to %TARGET_DIR%.
+    pause
+    exit /b 1
+)
+
+:: Open Windows Explorer at the target directory
+explorer "%TARGET_DIR%"
+
+ENDLOCAL
