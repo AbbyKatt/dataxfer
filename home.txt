@@ -4,14 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import datetime
-import torch
 
 #use wide layout
 st.set_page_config(layout="centered")
 #center title
 st.markdown('<style>h1{color: #FFFFFF; text-align: center;}</style>', unsafe_allow_html=True)
-st.title("FlowShift - Testing Dashboard")
-st.write("FlowShift is a Batch Job Manager to Automated testing and also provides results summation, configuration and visualization.")
+st.title("RAFT - Testing Dashboard")
 st.markdown("---")
 
 #picks a random filename from a subfolder

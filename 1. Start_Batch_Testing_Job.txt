@@ -8,9 +8,11 @@ import datetime
 import requests
 from st_aggrid import AgGrid, GridOptionsBuilder
 from urllib.parse import quote
+import os
 
 #API - interface, move to external library-------------------------------------------------------------------
-API_URL = "http://localhost:4040"
+API_URL = api_url = os.getenv('FLOWSHIFT_API', 'http://localhost:4040')
+print(f"API URL: {API_URL}")
 
 @st.cache_data
 def get_environments():
@@ -30,7 +32,7 @@ def get_test_types():
         st.error(f"Failed to retrieve test types. Status code: {response.status_code}")
         return []
 
-@st.cache_data
+#@st.cache_data
 def get_ComponentsForEnvironment(environment):
     response = requests.get(API_URL + "/get-test-components?environment=" + environment)
     if response.status_code == 200:
@@ -86,7 +88,7 @@ def queue_Workflows(workflows:list,threadpoolsize:int=4):
 st.set_page_config(layout="wide")
 
 st.markdown('<style>h1{color: #FFFFFF; text-align: center;}</style>', unsafe_allow_html=True)
-st.title("FlowShift")
+st.title("RAFT")
 st.subheader("Launch New Batch Testing Job")
 col1,col2=st.columns(2)
 with col1:
@@ -122,7 +124,7 @@ if 'TestableComponents' in st.session_state:
     queue=[]
     for row in selected_rows:
         queue.append(GetQueuedWorkFlowDict(environment,testtype,row['Component'],{}))
-    st.write(queue)
+    #st.write(queue)
 
     st.text("Shift-Click to select multiple components for batch testing...")
 
@@ -160,14 +162,14 @@ if 'TestableComponents' in st.session_state:
 
         #Run test
         if runTest:
-                    st.write(f"Starting Test Job for {selected_rows[0]['Component']} in {environment}...")
+                    st.write(f"Starting {len(queue)} Test Job(s) in {environment}...")
 
                     #Launch component using data from grid on selected row
                     comp=selected_rows[0]['Component']
                     testypedict=get_test_types()
                     testtype_short=testypedict[testtype]
                     ret=queue_Workflows(queue,batchSize)
-                    st.write(ret)
+                    #st.write(ret)
                     if ret[0]==False:
                         st.error("Failed to start test job:" + ret[1])
                     else:
