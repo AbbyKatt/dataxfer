@@ -57,6 +57,12 @@ def run_testworkflow(environment: str,testtype: str,component: str,threadpoolsiz
     global gWorkFlowManager
     return gWorkFlowManager.RunWorkFlow(environment,testtype,component,{},int(threadpoolsize))
 
+@app.get("/get-dataset")
+def get_dataset(environment:str,sql:str):
+    df=pd.read_gbq(sql,project_id=environment)
+    json=df.to_json()
+    return json
+
 class WorkFlowRequest(BaseModel):
     workflows: list
     threadpoolsize: int
