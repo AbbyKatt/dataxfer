@@ -1,11 +1,12 @@
 import time
+import traceback
 from config import Config
 from workflow_manager import WorkFlowManager
 from sqlfunctions import GetTestComponentsForEnvironment
 
 import sys
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import uvicorn
@@ -48,8 +49,18 @@ def get_test_types():
 
 @app.get("/get-test-components")
 def get_tests_for_env(environment: str):
-    df=GetTestComponentsForEnvironment(environment)
-    return df.to_json()
+    try:
+        df=GetTestComponentsForEnvironment(environment)
+        return df.to_json()
+    except Exception as e:
+        # Print detailed exception information
+        print("An error occurred:")
+        print(f"Exception type: {type(e).__name__}")
+        print(f"Exception message: {e}")
+        print("Traceback details:")
+        tb=traceback.format_exc()
+        return HTTPException(status_code=500,detail=f"An error occurred. Exception: {type(e).__name__}, Exception message: {e},TraceBack details: {tb}")
+        
 
 @app.get("/run-testworkflow")
 def run_testworkflow(environment: str,testtype: str,component: str,threadpoolsize:int):

@@ -33,14 +33,16 @@ class WorkFlowManager():
     def RunWorkFlow(self,environment:str,testtype:str,component:str,params:dict,threadpoolsize=4,immediateExecution=True):
         key=WorkFlowManager.GetWorkFlowKey(environment,testtype,component)
 
+        #Check if workflow already running
         if key in self.workflows:
-            return False,"Workflow already running"
+            if self.workflows[key].status not in ["Complete","Error"]:
+                return False,f"Workflow already {component}/{testtype} running"
 
-        #Create and rur or schedule workflow        
+        #Create and run or schedule workflow        
         wf=WorkFlow(key,self,environment,testtype,component,params,threadpoolsize)
         if not immediateExecution:
             self.workflows[key]=wf
-            return True,"Workflow scheduled"
+            return True,f"Workflow {component}/{testtype} scheduled"
         else:
             #Run it nao
             success,message=wf.Start()
@@ -48,21 +50,23 @@ class WorkFlowManager():
                 return False,message
             else:
                 self.workflows[key]=wf
-                return True,"Workflow started"
+                return True,f"Workflow {component}/{testtype} started"
 
     #Queue a batch of workflows
     def EnQueueWorkFlows(self,parameters:list,threadpoolsize=4):
         runImmediately=not self.GetAnyWorkFlowsRunning()
         print(f"EnQueue Workflow => Run immediately: {runImmediately}")
+        results=[]
         for param in parameters:
             environment=param["environment"]
             testtype=param["testtype"]
             component=param["component"]
             params=param["params"]
-            self.RunWorkFlow(environment,testtype,component,params,threadpoolsize,runImmediately)
+            result=self.RunWorkFlow(environment,testtype,component,params,threadpoolsize,runImmediately)
+            results.append(result)
             runImmediately=False
         print(f"EnQueue Workflow Added {len(parameters)} workflows to queue")
-        return True,"Workflows queued"
+        return results
 
     #Gets the current total usage stats for the environment
     def GetUsageStats(self,environment:str):
@@ -119,15 +123,14 @@ class WorkFlowManager():
     #Run new workflows as others finish
     def RunScheduler(self):
         if self.GetAnyWorkFlowsRunning():
-            print("Workflows running - skipping scheduler")
             return True, "Workflows running - skipping scheduler"
         else:
-            print("No workflows running - running scheduler")
+            # print("No workflows running - running scheduler")
             for key in self.workflows:
                 wf:WorkFlow=self.workflows[key]
                 if wf.status=="Scheduled":
                     print(f"Running scheduled workflow: {wf.GetWorkFlowKey()}")
                     wf.Start()
                     return True, "Scheduled workflow started"
-            print("No scheduled workflows found")
+            # print("No scheduled workflows found")
             return True, "No scheduled workflows found"
