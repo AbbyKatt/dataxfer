@@ -1,0 +1,28 @@
+#Dataframe Wrangler 
+import pandas as pd
+
+#Header info
+column1={"position":0,"name":"First_Name","type":"text"}
+column2={"position":1,"name":"Last_Name","type":"text"}
+columns=[column1,column2]
+
+records=[
+        ["John","Doe"],
+        ["Anna","Smith"],
+        ["Peter","Jones"],
+        ["Don","Johnson"],
+    ]
+        
+#Build main payload
+resultPayload={"result":
+    {
+        "column:":columns,
+        "records":records
+    }
+}
+
+resultPayload
+
+#Turn payload into a dataframe
+df=pd.DataFrame(resultPayload['result']['records'],columns=[x['name'] for x in resultPayload['result']['column:']])
+df
