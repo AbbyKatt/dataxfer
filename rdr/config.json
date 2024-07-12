@@ -1,0 +1,8 @@
+{
+    "LogFile":"log.csv",
+    "username":"user",
+    "password":"pass",
+    "certfile":"cert",
+    "environment":"datawx",
+    "sourcefolder":"SQL",
+    "bqDataSet":"RADAR"}

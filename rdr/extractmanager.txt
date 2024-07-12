@@ -1,0 +1,112 @@
+#Extract Manager Class -> manages the batch aspect and application state
+import os
+import concurrent.futures
+import pandas as pd
+
+from extractionstream import ExtractionStream
+
+class ExtractionJob():
+    
+    def __init__(self, feedname,sql,status,bqProject,bqDataset,bqTable,csvFile,FromDate,ToDate):
+        self.feedname=feedname
+        self.sql=sql
+        self.status=status
+        self.bqProject=bqProject
+        self.bqDataset=bqDataset
+        self.bqTable=bqTable
+        self.csvFile=csvFile
+        self.extractStatus=None
+        self.FromDate=FromDate
+        self.ToDate=ToDate
+        
+    def to_Json(self):
+        return {
+            "FeedName": self.feedname,
+            "SQL": self.sql,
+            "Status": self.status,
+            "BQTable": self.bqTable,
+
+            "ExtractStatus": self.extractStatus,
+            "FromDate": self.FromDate,
+            "ToDate": self.ToDate,
+            "BQProject": self.bqProject,
+            "BQDataset": self.bqDataset,
+        }
+
+
+class ExtractManager():
+    
+    def __init__(self, api,sourceFolder,bqProject,bqDataset,threadPoolSize=4):
+        self.api = api
+        self.sourceFolder=sourceFolder
+        self.bqProject=bqProject
+        self.bqDataset=bqDataset
+        self.threadPoolSize=threadPoolSize
+        self.tasks=[]
+
+
+    #Enumerates SQLs in source folder and launches the batch
+    def EnumerateSource(self,SourceFolder):
+        
+        #Enumerate SQL files in the source folder
+        self.tasks=[]
+        sourceFiles=os.listdir(SourceFolder)
+        for file in sourceFiles:
+            if file.endswith(".sql"):
+                sqlFile=os.path.join(SourceFolder,file)
+                feedname=file.replace(".sql","")
+                
+                #Read the SQL into string
+                with open(sqlFile, "r") as file:
+                    sql=file.read()
+                
+                #Create a job
+                job=ExtractionJob(feedname,sql,"Pending",self.bqProject,self.bqDataset,feedname,self.CSVFolder)
+                self.tasks.append(job)
+
+    #Enumerates SQLS from a BigQuery config table in the target dataset
+    def EnumerateSourceFromBQConfig(self,succeededFeeds,ReplaceAll=False):
+        print("Enumerating from BQ Config...")
+        tableName=self.bqDataset + ".radarconfig"
+        df=pd.read_gbq("SELECT * FROM " + tableName, project_id=self.bqProject)
+        
+        #For each row in the config table, create a job
+        for index, row in df.iterrows():
+            feedname=row["FeedName"]
+            sql=row["SQL_Override"]
+            TargetTableName=row["TargetTableName"]
+            FromDate=row["FromDate"]
+            ToDate=row["ToDate"]
+            
+            #If the SQL is empty, use the default
+            if sql is None or sql=="":
+                sql="SELECT * FROM " + TargetTableName 
+            
+            job=ExtractionJob(feedname,sql,"Pending",self.bqProject,self.bqDataset,TargetTableName,None,FromDate,ToDate)
+            #print(job.to_Json())
+            
+            #Only add the job if it has not been processed
+            if (feedname not in succeededFeeds) or ReplaceAll:
+                self.tasks.append(job)
+            
+        print(f"Queued {len(self.tasks)} jobs...")
+
+                
+    def RunTask(self,extractJob:ExtractionJob):
+        stream = ExtractionStream(self.api)
+        status=stream.StreamingExtract(extractJob.feedname,extractJob.sql,extractJob.bqProject,extractJob.bqDataset,extractJob.bqTable,extractJob.csvFile,extractJob.FromDate,extractJob.ToDate)
+        extractJob.extractStatus=status
+        print(status.to_Json())
+
+    #Sequentially runs the batch        
+    def RunBatch(self):
+        self.extractionResult=None
+        for task in self.tasks:
+            self.RunTask(task)
+            
+    #Threaded!
+    def RunThreadedBatch(self):
+        self.extractionResult=None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.threadPoolSize) as executor:
+            executor.map(self.RunTask, self.tasks)
+        

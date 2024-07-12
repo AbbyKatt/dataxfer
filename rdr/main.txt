@@ -1,0 +1,130 @@
+from datetime import datetime
+from extractmanager import ExtractManager
+from radarapi import RADARAPI
+import pandas as pd
+import typer
+from typing import Optional
+import json
+
+statusTableName="radar_copy_status"
+
+
+def GetFeedStatus(project,dataset):
+    print("Loading feed status...")
+    try:
+        df=pd.read_gbq(f"SELECT * FROM {dataset}.{statusTableName}", project_id=project)
+        #turn itno json
+        print("Status Found, using it")
+        jsonRecords=json.loads(df.to_json(orient="records"))
+    except:
+        print("No status found, creating empty")
+        jsonRecords={}
+    
+    #Now walk over records and make a dictionary by FeedName
+    feedStatus={}
+    for record in jsonRecords:
+        feedName=record["FeedName"]
+        feedStatus[feedName]=record
+    return feedStatus
+
+def GetSucceededFeeds(feedStatus):
+    succeededFeeds={}
+    for feedName in feedStatus:
+        if feedStatus[feedName]["SuccessStatus"]:
+            succeededFeeds[feedName]=feedStatus[feedName]
+    return succeededFeeds
+
+def main(config_file: str, thread_pool_size: int = 4,replaceAll:bool=False):
+    """
+    Command line interface function.
+
+    Args:
+        config_file (str): Path to the configuration file (required).
+        headless (bool, optional): Whether to run in headless mode. Defaults to True.
+        thread_pool_size (int, optional): Size of the thread pool. Defaults to 4.
+    """
+    typer.echo(f"Config file: {config_file}")
+    typer.echo(f"Thread pool size: {thread_pool_size}")
+
+    #Load the configuration file
+    with open(config_file) as f:
+        config = json.load(f)
+        LogFile=config["LogFile"]
+        username=config["username"]
+        password=config["password"]
+        certfile=config["certfile"]
+        environment=config["environment"]
+        sourcefolder=config["sourcefolder"]
+        bqDataSet=config["bqDataSet"]
+
+    #Get existing feed status/succeeded feeds
+    ret=GetFeedStatus(environment,bqDataSet)
+    succeededFeeds=GetSucceededFeeds(ret)
+
+    #Setup API
+    api = RADARAPI(username,password,certfile)
+    manager = ExtractManager(api,sourcefolder,environment,bqDataSet,threadPoolSize=thread_pool_size)
+
+    #Run the batch
+    startTime = datetime.now()
+    #manager.EnumerateSource(sourcefolder)
+    manager.EnumerateSourceFromBQConfig(succeededFeeds,replaceAll)
+    manager.RunThreadedBatch()
+    endTime = datetime.now()
+    elapsedTime = endTime - startTime
+
+    #Write logs
+    records=[]
+    print("-----------------------------------------------------------")
+    print("Extract Complete, table stats")
+    print("-----------------------------------------------------------")
+    completedFeeds=0
+    failedFeeds=0
+    for task in manager.tasks:
+        feedName=task.feedname
+        stat={}
+        stat["FeedName"]=feedName
+        stat["TableName"]=task.bqTable
+        stat.update(task.extractStatus.to_Json())
+        records.append(stat)
+        succeededFeeds[feedName]=stat
+        if task.extractStatus.SuccessStatus:
+            completedFeeds+=1
+        else:
+            failedFeeds+=1
+        paddedFeed= feedName.ljust(40)
+        print(f"{paddedFeed}  Succeeded:{stat['SuccessStatus']}")
+    
+    print("-----------------------------------------------------------")        
+    print(f"Completed Feeds: {completedFeeds}")
+    print(f"Failed Feeds: {failedFeeds}")
+    print(f"Elapsed Time: {elapsedTime}")
+    print("-----------------------------------------------------------")        
+        
+    #Turn succeeded feeds into dataframe
+    jsonRecords=[]
+    for feedName in succeededFeeds:
+        jsonRecords.append(succeededFeeds[feedName])
+    df=pd.DataFrame(jsonRecords)
+    df["ElapsedTime"]=df["ElapsedTime"].astype(str)
+    
+    #Write to bq
+    statTableName=bqDataSet + "." + statusTableName
+    print("Updating status table...")
+    df.to_gbq(statTableName, project_id=environment, if_exists="replace")
+    print("-----------------------------------------------------------")        
+
+    
+    
+    
+
+if __name__ == "__main__":
+    typer.run(main)
+
+
+
+
+
+
+    
+    

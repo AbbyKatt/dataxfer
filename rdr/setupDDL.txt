@@ -1,0 +1,15 @@
+#Setup Tools for RADAR
+import pandas as pd
+TargetDataSet="RADAR"
+
+#Define config table
+
+configRow1= {"FeedName":"dogs","TargetTableName":"dogs","FromDate":"2010-10-31","ToDate":"2010-02-01","SQL_Override":""}
+configRow2= {"FeedName":"cats","TargetTableName":"cats","FromDate":"2010-12-25","ToDate":"2010-02-01","SQL_Override":""}
+configRow3= {"FeedName":"ferrets","TargetTableName":"ferrets_01","FromDate":"2010-01-01","ToDate":"2010-02-01","SQL_Override":"select * from freets"}
+configRow4= {"FeedName":"wolves","TargetTableName":"dogs_wolves","FromDate":"1978-12-21","ToDate":"2010-02-01","SQL_Override":"break"}
+rows=[configRow1,configRow2,configRow3,configRow4]
+df=pd.DataFrame(rows)
+df.to_gbq("RADAR.radarconfig",project_id="datawx",if_exists="replace")
+df
+

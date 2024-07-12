@@ -1,0 +1,79 @@
+#Extractor Class
+#High level class whcih manages the entire extraction process 
+from datetime import datetime
+
+class ExtractionResult():
+    def __init__(self,SuccessStatus,ErrorMessage,RecordCount,ElapsedTime):
+        self.SuccessStatus=SuccessStatus
+        self.ErrorMessage=ErrorMessage
+        self.RecordCount=RecordCount
+        self.ElapsedTime=ElapsedTime
+        
+    def to_Json(self):
+        return {
+            "SuccessStatus": self.SuccessStatus,
+            "ErrorMessage": self.ErrorMessage,
+            "RecordCount": self.RecordCount,
+            "ElapsedTime": self.ElapsedTime
+        }
+
+class ExtractionStream():
+    
+    def __init__(self, api):
+        self.api = api
+
+    def Log(self, message):
+        print(message)
+
+    def InsertIntoBigQuery(self, df, firstTime, project, dataset, table):
+        # Just print the dataframe for now
+        recordCount=len(df)
+        self.Log(f"[{table}] Streaming Insert of {recordCount} records into BigQuery")
+        
+        #insert into bigquery
+        appendMode = "append" if not firstTime else "replace"
+        df.to_gbq(f"{dataset}.{table}", project_id=project, if_exists=appendMode)
+        
+        
+    #Streaming data from the API
+    def StreamingExtract(self, feedname,sql,bqProject,bqDataset,bqTable,csvFile=None,fromDate="",toDate=""):
+        try:
+            self.Log(f"Starting streaming extract for {feedname}")        
+            startTime = datetime.now()
+            
+            #Main loop
+            hasData = True
+            firstTime=True
+            totalRecords=0
+            while hasData:
+                token = self.api.RefreshToken()
+                response = self.api.RunQueryRaw(token, sql, fromDate, toDate)
+                df=self.api.GetDataFrame(response)
+                totalRecords+=len(df)
+                self.InsertIntoBigQuery(df, firstTime,bqProject, bqDataset, bqTable)
+                
+                if csvFile is not None:
+                    df.to_csv(csvFile, mode="a", header=firstTime)
+                
+                firstTime=False
+                next_page_token = self.api.GetNextPageToken(response)
+                if next_page_token is None:
+                    hasData = False
+
+            #Finish
+            endTime = datetime.now()
+            elapsedTime = endTime - startTime
+            status=ExtractionResult(True,"",totalRecords,elapsedTime)
+            self.Log(f"Completed streaming extract for {feedname} in {elapsedTime}")
+            return status
+    
+        except Exception as e:
+            status=ExtractionResult(False,str(e),0,0)
+            return status
+        
+
+# #Example usage
+# api = RADARAPI("user", "pass", "cert")
+# stream = ExtractionStream(api)
+# df=stream.StreamingExtract("DogData","SELECT * FROM Dogs","datawx","RADAR","dogs","dogs.csv")
+# df.to_Json()

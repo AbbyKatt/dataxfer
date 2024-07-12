@@ -1,0 +1,50 @@
+#RAdar API Mockup Class
+
+import random
+import pandas as pd
+import uuid
+
+class RADARAPI:
+    def __init__(self, username, password, certfile):
+        self.username = username
+        self.password = password
+        self.certfile = certfile
+        self.tokenCounter=0
+
+    def RefreshToken(self):
+        # Return a random GUID
+        return str(uuid.uuid4())
+
+    def RunQueryRaw(self, token, sql, fromDate="",toDate="",nextpage=""):
+        if sql=="break" :
+            raise Exception("Simulated SQL Error")
+        
+        # Return some JSON placeholder for now
+        return {"status": "success", "data": "placeholder"}
+
+    def GetNextPageToken(self, response):
+        # Just return NONE for now
+        self.tokenCounter+=1
+        if self.tokenCounter<5:
+            return str(uuid.uuid4())
+        else:
+            return None
+
+    def GetDataFrame(self, data):        
+        
+        # Produce a random dataframe with about 100 records
+        dog_names = ["Bella", "Max", "Charlie", "Molly", "Buddy", "Daisy", "Rocky", "Maggie", "Bailey", "Sophie"]
+        breeds = ["Labrador", "Poodle", "German Shepherd", "Bulldog", "Beagle", "Chihuahua", "Boxer", "Dachshund", "Husky", "Pug"]
+        records = []
+        
+        for _ in range(100):
+            record = {
+                "Name": random.choice(dog_names),
+                "Breed": random.choice(breeds),
+                "Age": random.randint(1, 15)
+            }
+            records.append(record)
+        
+        df = pd.DataFrame(records)
+        return df
+
