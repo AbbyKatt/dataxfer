@@ -1,0 +1,154 @@
+
+
+#Jupyter RAD tests
+import json
+import pandas as pd
+from google.cloud import bigquery
+import uuid
+from typing import List
+import os
+from vectorstoreazure import VectorStoreAzure
+from audithistory import AuditHistory
+from dirresult import DirResult
+from metarecord import MetaRecord
+from entitystoreapi import EntityStoreAPI
+from rafterrors import RAFTErrors
+from fastapi import HTTPException
+
+
+testProject="datawx"
+testDataset="EntityStoreTest"
+
+#VectorStore config
+print("EntityStore Server 0.2")
+service_name = "datawx-vectordb"
+admin_api_key=os.environ.get('admin_api_key')
+vector_service_name=os.environ.get('vector_service_name')
+openai_api_key=os.environ.get('OPENAI_API_KEY')
+app_api_key=os.environ.get('app_api_key')
+dirty_queue_name=os.environ.get('dirty_queue_name')
+dirty_queue_conn_str=os.environ.get('dirty_queue_conn_str')
+
+
+print(f"Admin API Key: {admin_api_key}")
+print(f"Vector Service Name: {vector_service_name}")
+print(f"OpenAI API Key: {openai_api_key}")
+print(f"App API Key: {app_api_key}")
+print(f"Dirty Queue Name: {dirty_queue_name}")
+print(f"Dirty Queue Conn Str: {dirty_queue_conn_str}")
+
+  
+#FastAPI interface
+from fastapi import FastAPI,Request,HTTPException
+from typing import List
+from pydantic import BaseModel
+
+#SDH TODO: Use proper pydantic models for the API instead of manually parsing JSON
+#SDH TODO: Make underlying BQ API async
+#SDH TODO: Add better error handling
+#SDH TODO: Add logging
+#SDH TODO: Add improved security
+
+#Set up database connection and API
+vs=VectorStoreAzure(vector_service_name, admin_api_key)
+esAPI=EntityStoreAPI(testProject,testDataset,vs,dirty_queue_name,dirty_queue_conn_str)
+app = FastAPI(docs_url=None, redoc_url=None)
+
+
+@app.post("/EntityStoreDir")
+async def EntityStoreDir(request: Request,EntityType:str,api_key:str):
+    #Simple security check
+    if api_key!=app_api_key:
+         raise HTTPException(status_code=401, detail="Unauthorized: Access to this resource is denied.")
+
+    # Try to get the body of the request and extract keys if available
+    keys:dict={}
+    try:
+        body = await request.json()
+        keys = body.get('keys', {})
+    except json.JSONDecodeError:
+        print("Error decoding JSON. Proceeding with default keys.")
+
+    #Run API, serialize results
+    ret=esAPI.Dir(EntityType,keys)
+    apiResults = [r.to_Json() for r in ret]
+    return apiResults
+
+@app.post("/EntityStorePull")
+async def EntityStorePull(request: Request,EntityType:str,api_key:str):
+    #Simple security check
+    if api_key!=app_api_key:
+         raise HTTPException(status_code=401, detail="Unauthorized: Access to this resource is denied.")
+
+    # Try to get the body of the request and extract keys if available
+    keys:dict={}
+    try:
+        body = await request.json()
+        keys = body.get('keys', {})
+    except json.JSONDecodeError:
+        print("Error decoding JSON. Proceeding with default keys.")
+
+    #Run API, serialize results
+    ret=esAPI.Pull(EntityType,keys)
+    apiResults = [r.to_Json() for r in ret]
+    return apiResults
+
+@app.post("/EntityStoreHistory")
+async def EntityStoreHistory(UUID:str,api_key:str):
+    #Simple security check
+    if api_key!=app_api_key:
+         raise HTTPException(status_code=401, detail="Unauthorized: Access to this resource is denied.")
+
+    #Run API, serialize results
+    ret=esAPI.GetVersionHistory(UUID)
+    apiResults = [r.to_Json() for r in ret]
+    return apiResults
+
+@app.post("/EntityStorePush")
+async def EntityStorePush(request: Request,api_key:str,author:str):
+    #Simple security check
+    if api_key!=app_api_key:
+         raise HTTPException(status_code=401, detail="Unauthorized: Access to this resource is denied.")
+
+    body = await request.json()
+    records=[]
+    for itm in body:
+        record=MetaRecord()
+        record.from_Json(itm)
+        records.append(record)
+
+    #Debug Write body to file
+    # with open('body.json', 'w') as f:
+    #     json.dump(body, f)
+
+    #Run API, serialize results
+    ret=esAPI.Push(records,author)
+    return ret
+
+@app.post("/EntityStoreErrorsRAFT")
+async def EntityStoreErrorsRAFT(api_key:str,projectID:str,dataset:str,filtered:bool):
+    if api_key!=app_api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    try:
+        rError=RAFTErrors(projectID,dataset)
+        if filtered:
+            jsonstr=json.loads(rError.getRAFTErrorsFiltered())
+            return jsonstr
+        else:
+            jsonstr=json.loads(rError.getRAFTErrors())
+            return jsonstr
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+                    
+
+
+            
+#Start Server
+import uvicorn
+from threading import Thread
+
+def run_server():
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+
+server_thread = Thread(target=run_server)
+server_thread.start()

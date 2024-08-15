@@ -1,0 +1,128 @@
+#EntityStoreBQ : Manages the storing of records in BigQuery
+#SDH TODO: Keys and dataFields are stored as JSON strings in BigQuery
+#SDH TODO: Add support for nested keys and dataFields using native BigQuery JSON structures
+#SDH TODO: Do this before making productionized solution - OK for testing! :)
+from google.cloud import bigquery
+from typing import List
+from BQSqlEntityStorelHelper import BQSqlEntityStorelHelper
+from metarecord import MetaRecord
+from dirresult import DirResult
+import uuid
+import pandas as pd
+from audithistory import AuditHistory
+
+class EntityStoreBQ:
+
+
+    def __init__(self,bqProjectID,DataSetID):
+        self.bqProjectID = bqProjectID
+        self.DataSetID = DataSetID
+
+    @staticmethod
+    def Create(bqProjectID,DataSetID):
+        #Create bigquery dataset if it doesn't exist
+        client = bigquery.Client()
+        dataset_ref = client.dataset(DataSetID)
+        try:
+            client.get_dataset(dataset_ref)
+            print(f'Using existing Dataset [{DataSetID}] where EntityStore exists.')
+        except:
+            dataset = bigquery.Dataset(dataset_ref)
+            dataset = client.create_dataset(dataset)
+            print('Dataset {} created.'.format(DataSetID))
+        return EntityStoreBQ(bqProjectID,DataSetID)
+
+    #Push list of MetaRecords to BigQuery
+    def Push(self,records):
+
+        #Build a pandas dataframe from the records
+        data = []
+        for record in records:
+            data.append(record.to_Json())
+        df = pd.DataFrame(data)
+
+        #Push the dataframe to BigQuery
+        df.to_gbq(self.DataSetID + ".EntityStore",project_id=self.bqProjectID,if_exists="append")
+        return True
+
+    #List all records of a given type
+    def Dir(self,EntityType,keys={},historicDate=None):
+        
+        #Build SQL, read records into a dataframe
+        sql=BQSqlEntityStorelHelper.GetDirSQL(self.DataSetID,EntityType,keys,historicDate)
+        df= pd.read_gbq(sql,project_id=self.bqProjectID)
+
+        #For each record, create a DirResult
+        DirResults = []
+        for index, row in df.iterrows():
+            DirResults.append(DirResult(row["uuid"],row["name"]))
+        return DirResults
+
+    #Pulls a list of MetaRecords from BigQuery
+    def Pull(self,EntityType,keys={},historicDate=None):
+        
+        #Build SQL, read records into a dataframe
+        sql=BQSqlEntityStorelHelper.GetPullSQL(self.DataSetID,EntityType,keys,historicDate)
+        df= pd.read_gbq(sql,project_id=self.bqProjectID)
+
+        #For each record, create a MetaRecord
+        MetaRecords = []
+        for index, row in df.iterrows():
+
+            #turn row into dictionary, deserialize JSON strings
+            rowDict=row.to_dict()
+            record=MetaRecord()
+            record.from_Json(rowDict)
+            MetaRecords.append(record)
+
+        return MetaRecords
+
+    #Drops EntityStore table - recreated with dummy record
+    def DropStorageTable(self):
+        print("Dropping Entity Store Table")
+        client = bigquery.Client()
+        table_ref = client.dataset(self.DataSetID).table("EntityStore")
+        client.delete_table(table_ref, not_found_ok=True)
+
+        #Create a dummy record so merge works
+        dummyRecord=MetaRecord()
+        dummyRecord.uuid=str(uuid.uuid4())
+        dummyRecord.name="Dummy"
+        dummyRecord.entityType="Dummy"
+        dummyRecord.author="System"
+        self.Push([dummyRecord])
+
+        return True
+
+    #Pulls latest MetaRecords from BigQuery by UUID
+    #SDH TODO: BigQuery has a 1MB limit on queries, so we need to batch this
+    def PullByUUID(self,uuidlist:List[str]):
+        
+        #Build SQL, read records into a dataframe
+        sql=BQSqlEntityStorelHelper.GetPullByUUIDSQL(self.DataSetID,uuidlist)
+        df= pd.read_gbq(sql,project_id=self.bqProjectID)
+
+        #For each record, create a MetaRecord
+        MetaRecords = []
+        for index, row in df.iterrows():
+
+            #turn row into dictionary, deserialize JSON strings
+            rowDict=row.to_dict()
+            record=MetaRecord()
+            record.from_Json(rowDict)
+            MetaRecords.append(record)
+
+        return MetaRecords
+    
+    #Get version history for a given UUID
+    def GetVersionHistory(self,uuid):
+        
+        #Build SQL, read records into a dataframe
+        sql=BQSqlEntityStorelHelper.GetVersionHistorySQL(self.DataSetID,uuid)
+        df= pd.read_gbq(sql,project_id=self.bqProjectID)
+
+        #For each record, create a MetaRecord
+        AuditHistoryRecords = []
+        for index, row in df.iterrows():
+            AuditHistoryRecords.append(AuditHistory(row["author"],row["latestUpdate"],row["changeHistory"]))
+        return AuditHistoryRecords

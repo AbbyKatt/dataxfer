@@ -1,0 +1,43 @@
+#EmbeddingsFactory : Class to generate embeddings on a list of MetaRecords
+from openai import OpenAI
+from typing import List
+from metarecord import MetaRecord
+
+
+class EmbeddingsFactory:
+
+    #Get embeddings from the vectorDB
+    @staticmethod
+    def GetEmbeddings(contentList:List[str],model="text-embedding-3-small"):
+        client = OpenAI()
+        
+        #Remove newlines from the content (confused Vector Embedding search)
+        print("Creating Embeddings for " + str(len(contentList)) + " descriptions")
+        text=[content.replace("\n"," ") for content in contentList]
+        embeddings= client.embeddings.create(input = text, model=model).data
+        embeddings=[ret.embedding for ret in embeddings]
+        print("Done")
+        return embeddings
+    
+    @staticmethod
+    def GetEmbeddingsBatched(contentList:List[str],model="text-embedding-3-small",batchSize=50):
+        embeddings=[]
+        for i in range(0,len(contentList),batchSize):
+            batch=contentList[i:i+batchSize]
+            batchEmbeddings=EmbeddingsFactory.GetEmbeddings(batch,model)
+            embeddings+=batchEmbeddings
+        print("Done")
+        return embeddings
+
+    #Create embeddings and attached them to the MetaRecords
+    @staticmethod
+    def GenerateEmbeddings(metaRecords:List[MetaRecord]):
+        #Get the content of all the records
+        contentList=[metaRecord.content() for metaRecord in metaRecords]
+
+        #Generate embeddings
+        embeddings=EmbeddingsFactory.GetEmbeddingsBatched(contentList)
+
+        #Assign embeddings to the records
+        for i in range(len(metaRecords)):
+            metaRecords[i].contentEmbedding=embeddings[i]

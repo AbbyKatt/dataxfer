@@ -1,0 +1,25 @@
+import pandas as pd
+
+class RAFTErrors:
+    def __init__(self,ProjectID,TestDataset):
+        self.TestDataset=TestDataset
+        self.ProjectID=ProjectID
+        
+
+    #Return errors functions
+    def getRAFTErrors(self):
+        SQL=f"select * from {self.TestDataset}.vw_Errors"
+        df= pd.read_gbq(SQL,project_id=self.ProjectID)
+        df_json=df.to_json(orient='records')
+        return df_json
+
+    def getRAFTErrorsFiltered(self):
+        SQL=f"select * from {self.TestDataset}.RAFTFilteredResults"
+        df= pd.read_gbq(SQL,project_id=self.ProjectID)
+        df_json=df.to_json(orient='records')
+        return df_json
+
+#Tests -> Use Jupyter 
+# #getRAFTErrors("Causality_BaseLine")
+# rError=RAFTErrors("datawx","Causality_BaseLine")
+# rError.getRAFTErrorsFiltered()

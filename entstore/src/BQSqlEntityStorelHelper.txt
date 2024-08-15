@@ -1,0 +1,117 @@
+#SQLHelper class - just contains the SQL templates we use
+from typing import List
+class BQSqlEntityStorelHelper():
+
+    @staticmethod
+    def BuildFilter(keys):
+        filterStr=""
+        for key in keys:
+            value=keys[key]
+            formatStr=f"keys like '%¬{key}¬: ¬{value}¬%' AND "
+            filterStr+=formatStr
+
+        #replace ¬ with "
+        filterStr=filterStr.replace("¬",'"')  
+
+        #Remove trailing AND
+        if filterStr!="":
+            filterStr=" AND " + filterStr[:-5]
+
+        return filterStr
+
+    @staticmethod
+    def BuildDateFilter(maxDate):
+        if maxDate is None:
+            return ""
+        else:
+            strDate = maxDate.strftime('%Y-%m-%d %H:%M:%S')        
+            return f" AND latestUpdate <= '{strDate}'"
+
+    @staticmethod
+    def GetDirSQL(datasetName,EntityType,Keys,MaxDate=None):
+        filterStr=BQSqlEntityStorelHelper.BuildFilter(Keys)
+        dateStr=BQSqlEntityStorelHelper.BuildDateFilter(MaxDate)
+        sql=f"""
+                WITH RankedEntities AS (
+                SELECT
+                    uuid,
+                    name,
+                    latestUpdate,
+                    ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY latestUpdate DESC) AS rn
+                FROM
+                    `{datasetName}.EntityStore`
+                WHERE
+                    EntityType = '{EntityType}'
+                    {filterStr}
+                    {dateStr}
+                )
+                SELECT
+                uuid,
+                name
+                FROM
+                RankedEntities
+                WHERE
+                rn = 1
+                
+                ORDER by name;
+        """
+        return sql
+    
+
+    @staticmethod
+    def GetPullSQL(datasetName,EntityType,Keys,MaxDate=None):
+        filterStr=BQSqlEntityStorelHelper.BuildFilter(Keys)
+        dateStr=BQSqlEntityStorelHelper.BuildDateFilter(MaxDate)
+        sql=f"""  
+                WITH RankedEntities AS (
+                SELECT
+                        *,
+                        ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY latestUpdate DESC) AS rn
+                FROM
+                    `{datasetName}.EntityStore`
+                WHERE
+                    EntityType = '{EntityType}'
+                    {filterStr}
+                    {dateStr}
+                )
+                SELECT
+                    *  FROM
+                RankedEntities
+                WHERE
+                rn = 1
+
+                ORDER by name;
+        """
+        return sql
+    
+    @staticmethod
+    def GetPullByUUIDSQL(datasetName,uuidlist:List[str]):
+        uuidStr="','".join(uuidlist)
+        sql=f"""  
+                WITH RankedEntities AS (
+                SELECT
+                        *,
+                        ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY latestUpdate DESC) AS rn
+                FROM
+                    `{datasetName}.EntityStore`
+                WHERE
+                    uuid in ('{uuidStr}')
+                )
+                SELECT
+                    *  FROM
+                RankedEntities
+                WHERE
+                rn = 1
+
+                ORDER by name;
+        """
+        return sql
+
+    @staticmethod
+    def GetVersionHistorySQL(datasetName,uuid):
+        sql=f"""
+                select latestUpdate,author,changeHistory from `{datasetName}.EntityStore`
+                where uuid='{uuid}'
+                order by latestUpdate desc
+        """
+        return sql

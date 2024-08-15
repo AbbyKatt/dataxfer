@@ -1,0 +1,18 @@
+class AuditHistory:
+
+    def __init__(self,author,timestamp,description):
+        self.author = author
+        self.timestamp = timestamp
+        self.description = description
+    
+    def to_Json(self):
+        return {
+            "author":self.author,
+            "timestamp":self.timestamp,
+            "description":self.description
+        }
+    
+    def from_Json(self,jsonStr):
+        self.author = jsonStr["author"]
+        self.timestamp = jsonStr["timestamp"]
+        self.description = jsonStr["description"]

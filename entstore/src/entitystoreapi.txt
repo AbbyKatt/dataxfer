@@ -1,0 +1,145 @@
+from vectorstoreazure import VectorStoreAzure
+from azure.servicebus import ServiceBusClient, ServiceBusMessage
+from typing import List
+from metarecord import MetaRecord
+from entitystorebq import EntityStoreBQ
+import pandas as pd
+import uuid
+from embeddingsfactory import EmbeddingsFactory
+import json
+
+class EntityStoreAPI():
+
+    def __init__(self,ProjectID,DataSetID,vectorStore:VectorStoreAzure,dirtyQueueName,dirtyQueueConnStr,provider="EntityStoreBQ"):
+        self.ProjectID = ProjectID
+        self.DataSetID = DataSetID
+        self.vectorStore=vectorStore
+        self.dirtyQueueName=dirtyQueueName
+        self.dirtyQueueConnStr=dirtyQueueConnStr
+        
+        if provider == "EntityStoreBQ":
+            self.provider = EntityStoreBQ.Create(ProjectID,DataSetID)
+        else:
+            raise ValueError("Unknown provider")
+
+    #Drops the storage table/EntityStore - new inserts will recreate it
+    def DropStorageTable(self):
+        return self.provider.DropStorageTable()
+    
+    #Send a message to the Azure Service Bus QUEUE with a list of "dirty" records
+    def MarkRecordsDirty(self,records:List[MetaRecord]):
+        
+        #Create a list of UUIDs
+        print(f"Sending PREFECT Notification for {len(records)} changed records")
+        uuids=[]
+        for record in records:
+            uuids.append(record.uuid)
+
+        try:
+            servicebus_client = ServiceBusClient.from_connection_string(conn_str=self.dirtyQueueConnStr, logging_enable=True)
+            message={"records":uuids,
+                    "action":"process"}
+            message=json.dumps(message)
+
+            # Send a single message
+            with servicebus_client:
+                # Create a sender for the queue
+                sender = servicebus_client.get_queue_sender(queue_name=self.dirtyQueueName)
+                with sender:
+                    message = ServiceBusMessage(message)
+                    sender.send_messages(message)
+                    print("Record Change Nortification sent to PREFECT")
+            return True
+        except Exception as e:
+            print(f"Error sending changed records to PREFECT: {e}")
+            return False
+        
+    #Push to BQ, whilst performing a merge and keeping track of change history
+    #SDH TODO: We don't have Deletions at this point -> probably add an IsDeleted flag
+    def Push(self,records:List[MetaRecord],author=""):
+        resultStats={"Status:":"OK"}
+
+        #Make a list of UUIDs from the records, build dictionary of UUIDs to records
+        uuids=[]
+        uuidToRecord={}
+        for record in records:
+            uuids.append(record.uuid)
+            uuidToRecord[record.uuid]=record
+
+            #Clear existing change history
+            record.changeHistory=""
+
+        #Pull latest records from the store
+        existingRecords=self.provider.PullByUUID(uuids)
+
+        #Build existing records dictionary
+        print("Fetching Previous Records")
+        existingRecordsDict={}
+        for record in existingRecords:
+            print(record.to_Json())
+            existingRecordsDict[record.uuid]=record
+        #dbg
+        print(f"Fetched {len(existingRecords)} records")
+        resultStats["Existing Records"]=len(existingRecords)
+
+        #Handle New Records
+        newRecords=[]
+        newRecordsDict={}
+        for record in records:
+            if record.uuid == "":
+                #Set change history/assign UUID/latest update
+                record.uuid = str(uuid.uuid4())
+                record.changeHistory="New Record Added"
+                record.latestUpdate = str(pd.Timestamp.now())
+                if len(author)>0:
+                    record.author=author
+                newRecords.append(record)
+                newRecordsDict[record.uuid]=record
+        #dbg
+        print(f"New Records {len(newRecords)}")
+        resultStats["New Records"]=len(newRecords)
+
+        #Handle Changed Records
+        changedRecords=[]
+        for record in records:
+            if record.uuid in existingRecordsDict:
+                existingRecord=existingRecordsDict[record.uuid]
+                if existingRecord.isChanged(record.dataFields) or existingRecord.isMetaDataChanged(record):
+                    record.changeHistory=existingRecord.getChangeHistory(record)
+                    record.latestUpdate = str(pd.Timestamp.now())
+                    if len(author)>0:
+                        record.author=author
+                    changedRecords.append(record)
+        #dbg
+        print(f"Changed Records {len(changedRecords)}")             
+        resultStats["Changed Records"]=len(changedRecords)
+
+        #Push new and updated records
+        ret=self.provider.Push(newRecords+changedRecords)
+        resultStats["Push Status"]=ret
+
+        #Generate embeddings for new and changed records
+        EmbeddingsFactory.GenerateEmbeddings(newRecords+changedRecords)
+
+        #Push to Vector Store
+        vectorRecords=MetaRecord.toVectorRecordList(newRecords+changedRecords)
+        if len(vectorRecords)>0:
+            ret=self.vectorStore.InsertVectorRecords("metarecord_store",vectorRecords)
+            resultStats["Vector Store Insert Status"]=ret
+        else:
+            resultStats["Vector Store Insert Status"]="No Changes"
+
+
+        self.MarkRecordsDirty(newRecords+changedRecords)
+        return resultStats
+
+    #Lists all records of a given type/filter
+    def Dir(self,EntityType,keys={}):
+        return self.provider.Dir(EntityType,keys)
+
+    #Pulls a record from the store of a given type/filter
+    def Pull(self,EntityType,keys={},historicDate=None):
+        return self.provider.Pull(EntityType,keys,historicDate)
+    
+    def GetVersionHistory(self,uuid):
+        return self.provider.GetVersionHistory(uuid)

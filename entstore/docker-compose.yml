@@ -1,0 +1,23 @@
+version: '3.8'
+services:
+  entitystoreapi:
+    image: datawx/entitystoreapi
+    volumes:
+      - c:/temp/keys:/var/keys
+    restart: always
+    ports:
+      - "8000:8000"
+    networks:
+      - es_network
+    environment:
+      - admin_api_key=adminKey
+      - vector_service_name=datawx-vectordb
+      - OPENAI_API_KEY=$OPENAI_API_KEY
+      - GOOGLE_APPLICATION_CREDENTIALS=/var/keys/svc_act.json
+      - app_api_key=api_key_here
+      - dirty_queue_name=prefect-changed-records
+      - dirty_queue_conn_str="Endpoint=sb://"
+
+networks:
+  es_network:
+    driver: bridge

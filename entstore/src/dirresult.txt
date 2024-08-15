@@ -1,0 +1,16 @@
+#Search result from Dir command
+class DirResult():
+
+    def __init__(self,uuid,Name):
+        self.uuid = uuid
+        self.Name = Name
+
+    def to_Json(self):
+        return {
+            "uuid":self.uuid,
+            "Name":self.Name
+        }
+    
+    def from_Json(self,jsonStr):
+        self.uuid = jsonStr["uuid"]
+        self.Name = jsonStr["Name"]
