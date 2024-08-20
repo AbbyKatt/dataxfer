@@ -1,0 +1,186 @@
+
+/* Create body tag with gentle gradient from white to blue */
+html, body {
+    height: 100%;
+    margin: 0;
+
+    overflow: hidden;
+    overflow-y: hidden;
+    overflow-x: hidden;
+    /* overflow: -moz-scrollbars-none;
+    -ms-overflow-style: none;
+    scrollbar-width: none; */
+  }
+  
+  .container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  
+  .top {
+    /* background-color: #f2f2f2; */
+
+    /*Y scrollbar always on*/
+    overflow: -moz-scrollbars-none;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    overflow-y: scroll;
+    overflow-x: hidden;
+    flex: 84%;
+  }
+  
+  .bottom {
+    /* background-color: #d9d9d9; */
+    flex: 16%;
+  }
+  
+
+/* body {
+    background: #fff;
+    background: -webkit-linear-gradient(to bottom, #fff, #e6f2ff);
+    background: linear-gradient(to bottom, #fff, #e6f2ff);
+    font-family: 'Roboto', sans-serif;
+    font-size: 14px;
+    color: #333;
+    margin: 0;
+    padding: 0;
+} */
+
+#chatbox {
+    height: 600px; /* Set a fixed height for the chatbox */
+    overflow-y: scroll; /* Enable vertical scrolling */
+  }
+ 
+
+/* rounded borders for ancient internet explorer */
+.chat-agent{
+    border-radius: 5px;
+    -moz-border-radius: 5px;
+    -webkit-border-radius: 5px;
+
+    border: 2px solid #000;
+    background-color: #CCCCFF;
+
+    /* top and bottom padding */
+    padding-top: 2px;
+    padding-bottom: 2px;
+
+    /* margin space top bottom between chat bubbles */
+    margin-top: 5px;
+    margin-bottom: 5px;
+
+    /*centered 88% */
+    margin-left: 2%;
+    margin-right: 2%;
+
+    /* 88% width */
+    width: 96%;
+}
+
+/* rounded borders for ancient internet explorer */
+.chat-debug{
+  border-radius: 5px;
+  -moz-border-radius: 5px;
+  -webkit-border-radius: 5px;
+
+  border: 2px solid #000;
+  background-color: #CCAAFF;
+
+  /*centered 88% */
+  margin-left: 14%;
+  margin-right: 2%;
+
+  /* top and bottom padding */
+  padding-top: 2px;
+  padding-bottom: 2px;
+
+  /* margin space top bottom between chat bubbles */
+  margin-top: 5px;
+  margin-bottom: 5px;
+
+  /* 88% width */
+
+  width: 90%;    
+
+}
+
+
+.chat-user-reply{
+    border-radius: 5px;
+    -moz-border-radius: 5px;
+    -webkit-border-radius: 5px;
+
+    border: 2px solid #000;
+    background-color: #AAAAFF;
+
+    /*centered 88% */
+    margin-left: 8%;
+    margin-right: 2%;
+
+    /* top and bottom padding */
+    padding-top: 2px;
+    padding-bottom: 2px;
+
+    /* margin space top bottom between chat bubbles */
+    margin-top: 5px;
+    margin-bottom: 5px;
+
+    /* 88% width */
+
+    width: 90%;    
+
+}
+
+.chat-user{
+    border-radius: 5px;
+    -moz-border-radius: 5px;
+    -webkit-border-radius: 5px;
+
+    border: 2px solid #000;
+    background-color: #CCCCFF;
+
+    /*centered 88% */
+    margin-left: 2%;
+    margin-right: 2%;
+
+    /* 88% width */
+    width: 96%;
+}
+
+.chat-bubble{
+    border-radius: 5px;
+    -moz-border-radius: 5px;
+    -webkit-border-radius: 5px;
+
+    /* border: 2px solid #000; */
+    background-color: #DDDDFF;
+
+    /*centered 88% */
+    /* margin-left: 2%;
+    margin-right: 2%;
+    height: 30px; */
+
+    width: 100%;
+}
+
+
+
+.innertext{
+    padding: 10px;
+}
+
+/* Bottom aligned div where users can type questions */
+.bottomtext{
+    /* position: fixed;
+    background-color: #AAA;*/
+    
+    /*align to bottom:*/
+    position: absolute;
+
+    bottom: -10px; 
+    width: 100%;
+    height: 50px;
+    border-top: 1px solid #ccc;
+    padding: 10px;
+}

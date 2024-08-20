@@ -1,0 +1,438 @@
+#Rosetta - Setup and Load Embeddings
+from openai_function_call import openai_function
+from fChain import fChain
+from vectorstoreazure import VectorStoreAzure
+import os
+import json
+from typing import List
+from google.cloud import bigquery
+import pandas as pd
+from lineagesolverapi import LineageSolverAPI
+
+
+#VectorStore config
+print("ChatBot Server 0.2 Starting Up")
+service_name = "datawx-vectordb"
+admin_api_key=os.environ.get('admin_api_key')
+vector_service_name=os.environ.get('vector_service_name')
+openai_api_key=os.environ.get('OPENAI_API_KEY')
+app_api_key=os.environ.get('app_api_key')
+print(f"Admin API Key: {admin_api_key}")
+print(f"Vector Service Name: {vector_service_name}")
+print(f"OpenAI API Key: {openai_api_key})")
+print(f"App API Key: {app_api_key}")
+
+#Setup Lineage Solver -> move these into config like above SDH TODO/ table needs to come thru setup hook
+EntStoreURL="https://entitystore.datawx.uk"
+tableUUID=""
+entapiKey=""
+iLineageSolver=LineageSolverAPI(EntStoreURL,entapiKey,tableUUID)
+iLineageSolver.LoadGraph()
+   
+#Agent #1 -> Vector Store search over root level fields
+#------------------------------------------------------------------------------------------------------------------------------
+vs=VectorStoreAzure(service_name, admin_api_key)    
+
+#SDH TODO: No hardcoded values like dataset or environment
+@openai_function
+def FieldSearch(field_name_or_description):
+    """Searches the spec for field derivations by name of their description for the current database project. Use this function to answer all your queries 
+    
+    Returns:
+    str: Search results as a string. Read through them and discard ones which do not match your query.
+    """
+    # Initialize the BigQuery client
+    try:
+        print(f"Running FieldSearch on [{field_name_or_description}]")
+        ret=vs.SearchVectorStore('metarecord_store',field_name_or_description)
+        return ret
+
+    except Exception as e:
+        print(e)
+        return e
+
+#SDH TODO: No hardcoded values like dataset or environment
+@openai_function
+def get_table_schema(table_id):
+    """Get the schema for a table"""
+    try:
+        project_id="datawx"
+        client = bigquery.Client(project=project_id)
+        table_ref = client.dataset("CauslaitySampleData").table(table_id)
+        table = client.get_table(table_ref)
+
+        # Print the schema
+        schema = []
+        for field in table.schema:
+            schema.append({
+                "name": field.name,
+                "field_type": field.field_type,
+                "mode": field.mode,
+                "description": field.description
+            })
+        
+        jsonD=json.dumps(schema)
+        return jsonD
+    except Exception as e:
+        print(e)
+        return f"Cannot read {table_id}"
+
+#SDH TODO: No hardcoded values like dataset or environment
+@openai_function
+def list_tables_in_dataset():
+    """Lists all tables in the current testing dataset.
+    Returns:
+    - list: A list of table names.
+    """
+    try:
+        project_id="datawx"
+        client = bigquery.Client(project=project_id)
+        dataset_ref = client.dataset("CauslaitySampleData")
+        tables = list(client.list_tables(dataset_ref))
+        table_names = [table.table_id for table in tables]
+        jsonD=json.dumps(table_names)
+        return jsonD
+    except Exception as e:
+        print(e)
+        #turn exception to json
+        jsonEx=json.dumps(e)
+        return jsonEx
+
+#------------------------------------------------------------------------------------------------------------------------------        
+# Source control views Agent
+#------------------------------------------------------------------------------------------------------------------------------        
+
+def list_bigquery_views(project_id, dataset_id):
+    
+    client = bigquery.Client(project=project_id)
+    dataset_ref = client.dataset(dataset_id, project=project_id)
+    tables = client.list_tables(dataset_ref)
+
+    # Print names of views
+    tablesInView=[]
+    for table in tables:
+        if table.table_type == 'VIEW':
+            #print(table.table_id)
+            tablesInView.append(table.table_id)
+    return tablesInView
+
+def get_bigquery_view(project_id, dataset_id, view_id):
+    client = bigquery.Client(project=project_id)
+    dataset_ref = client.dataset(dataset_id, project=project_id)
+    table_ref = dataset_ref.table(view_id)
+    table = client.get_table(table_ref)
+    return table.view_query
+
+@openai_function
+def ListSourceTables():
+    """Gets the names of the source code views which create the tables in the dataset"""
+    ret=list_bigquery_views("datawx", "CauslaitySampleData")
+    for table in ret:
+        print(table)
+    #turn to json
+    return json.dumps(ret)
+
+@openai_function
+def GetSourceCode(viewName):
+    """Get the source code of the view which creates the table in the dataset"""
+    try:
+        ret=get_bigquery_view("datawx", "CauslaitySampleData", viewName)
+        return str(ret)
+    except Exception as e:
+        print(e)
+        ret=str(e)
+
+    return ret
+
+# @openai_function
+# def GetErrorStatus(TableName,FieldName):
+#     """Get the error status from Testing of a field in the dataset"""
+#     #SDH TODO: So much. Dont read a json file for a start. This is demo code only
+#     filePath="errors.json"
+#     #read file json
+#     with open(filePath) as f:
+#         data = json.load(f)
+        
+#     key=TableName+"."+FieldName
+#     if key in data:
+#         ret=data[key]
+#     else:
+#         ret= ["PASS",""]
+    
+#     return f"The field {FieldName} has the following Test status: {ret[0]} with the following message: [{ret[1]}]"
+
+@openai_function
+def GetErrorStatus(TableName,FieldName):
+    """Get the error status from Testing of a field in the dataset"""
+    try:
+        Table="RAFT_RESULTS.vw_causality_fieldsummary"
+        query=f"SELECT * FROM {Table} WHERE Field='{TableName}.{FieldName}'"
+        df=pd.read_gbq(query,project_id="datawx")
+        if len(df)==0:
+            return f"The field {FieldName} has PASSED"
+        else:
+            #return df["Error"].values[0],df["Message"].values[0]
+            return f"The field {FieldName} has the following Test status: {df['Error'].values[0]} with the following message: [{df['Message'].values[0]}]"
+    except Exception as e:
+        return "Error Getting status from BigQuery: "+str(e)
+
+
+#------------------------------------------------------------------------------------------------------------------------------        
+# Data Lineage Agents
+#------------------------------------------------------------------------------------------------------------------------------        
+@openai_function
+def GetFieldPrerequisite(tableName,fieldName):
+    """Searches the dependency graph for the field and returns the fields needed to compute this one. Use this to work out how something is sourced"""
+    global iLineageSolver
+    ret=iLineageSolver.GetFieldPrerequisite(tableName,fieldName)
+    print(ret)
+    return ret
+
+@openai_function
+def GetFieldDependencies(tableName,fieldName):
+    """Searches the dependency graph and finds out what other fields depend on this for computation. Use this to work out what is impacted by a change in this field"""
+    global iLineageSolver
+    ret=iLineageSolver.GetFieldDependencies(tableName,fieldName)
+    print(ret)
+    return ret
+
+@openai_function
+def GetFieldPrerequisiteTables(tableName,fieldName):
+    """Searches the dependency graph for the field and returns the tables needed to compute it. Use this to work out which Tables the data is sourced from"""
+    global iLineageSolver
+    return iLineageSolver.GetFieldPrerequisiteTables(tableName,fieldName)    
+
+@openai_function
+def GetFieldDependentTables(tableName,fieldName):
+    """Searches the dependency graph and finds what tables depend on this field for computation."""
+    global iLineageSolver
+    return iLineageSolver.GetFieldDependentTables(tableName,fieldName)
+
+
+#------------------------------------------------------------------------------------------------------------------------------        
+# Scary agent - run any SQL query. Probably should be disabled in production
+#------------------------------------------------------------------------------------------------------------------------------        
+def read_bigquery_as_json(sql: str) -> str:
+    from google.oauth2 import service_account
+
+    # Modify the SQL to add a LIMIT clause if not already present
+    sql = sql.strip().rstrip(';')  # Strip whitespace and trailing semicolon
+    if "limit" not in sql.lower():  # Check if a limit clause is already there
+        sql += " LIMIT 100"  # Add limit clause if not
+
+    df = pd.read_gbq(sql, project_id="datawx",)
+    #json_str =  json.dumps(df.to_json(orient='records'))
+    #Dump PD dataframe as tab delimited
+    json_str = df.to_csv(sep='\t',index=False)
+    
+    return json_str
+
+@openai_function
+def RunSQLQuery(sql):
+    """Run any SQL query on the dataset. This function is for debugging purposes only and should be disabled in production.
+    Don't forget to prefix the dataset [CauslaitySampleData] to table names (i.e. dataset.table notation) when generating the SQL """
+    try:
+        print("******************************************************")
+        print("******************************************************")
+        print(f"Running SQL Query: {sql}")
+        print("******************************************************")
+        print("******************************************************")
+        
+        ret=read_bigquery_as_json(sql)
+        return ret
+    except Exception as e:
+        print(e)
+        return str(e)
+
+#------------------------------------------------------------------------------------------------------------------------------        
+#Configurable Agents
+globalAgents=   {"FieldSearch":FieldSearch,
+                "get_table_schema":get_table_schema,
+                "list_tables_in_dataset":list_tables_in_dataset,
+                "ListSourceTables":ListSourceTables,
+                "GetSourceCode":GetSourceCode,
+                "RunSQLQuery":RunSQLQuery,
+                "LineagePrerequisiteFields":GetFieldPrerequisite,
+                "LineageDependentFields":GetFieldDependencies,
+                "GetFieldPrerequisiteTables":GetFieldPrerequisiteTables,
+                "GetFieldDependentTables":GetFieldDependentTables,
+                "GetErrorStatus":GetErrorStatus}
+
+globalAgentsDesc={"FieldSearch":"Vector Database Search on Fields and Tables",
+                "get_table_schema":"Big Query Table Schemas for the test dataset",
+                "list_tables_in_dataset":"List of Big Query Tables in the test dataset",
+                "ListSourceTables":"List of Source Control Views in the test dataset",
+                "GetSourceCode":"Source Code for a given Source Control View",
+                "RunSQLQuery":"Run any SQL Query on the test dataset",
+                "LineagePrerequisiteFields":"Get the fields needed to compute a target field",
+                "LineageDependentFields":"Get the fields which depend on a target field",
+                "GetFieldPrerequisiteTables":"Get the tables needed to compute a target field",
+                "GetFieldDependentTables":"Get the tables which depend on a target field",
+                "GetErrorStatus":"Get the error status of a field in the dataset"}
+
+#------------------------------------------------------------------------------------------------------------------------------        
+
+#Serve up FastAPI
+from fastapi import Depends
+from fastapi.responses import FileResponse,HTMLResponse
+from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
+
+class ValidateRequest(BaseModel):
+    DatasetName: str
+    SourceTable: str
+    TargetTable: str
+    TargetField: str
+    DerivationLogic: str
+
+class ChatRequest(BaseModel):
+    user: str
+
+class ChatSetup(BaseModel):
+    guid: str
+    parameters:dict
+    plugins:dict
+
+    @staticmethod
+    def from_json(json_string):
+        json_dict = json.loads(json_string)
+        return ChatSetup(**json_dict)
+    
+class LinkageRequest(BaseModel):
+    api_key: str
+    tableName: str
+    fieldName: str
+    
+    @staticmethod
+    def from_json(json_string):
+        json_dict = json.loads(json_string)
+        return LinkageRequest(**json_dict)
+
+def initFChain(plugins):
+    global chatBot
+    chatBot=fChain("""You are a helpful Database Testing Agent. You solve problems by using the tools you're given and looking at specs.
+    For testing SQL use the dataset called [CauslaitySampleData].
+    For every Target Table the Source Code ETL is viewable in the Source Control Views and prefixed with a src_ (ie src_Target_Table) 
+    Don't forget to prefix the dataset CauslaitySampleData to table names (i.e. dataset.table notation) -  when generating the SQL. No Square brackets please this is BigQuery
+
+    Be proactive and ALWAYS follow through by reading source code and checking results in the database, no need to ask for permission.
+    
+    If someone asks WHY a field is broken run the LineagePrerequisiteFields function to see what fields are needed to compute it - then advise them. Don't rely on the error status alone as it may be wrong.
+    
+    
+    However when answering results be concise, brief and clear. Users are high-end DBA/testers and don't want to be lectured.
+    Also their time is short - your purpose is to help them get to the root cause of the issue quickly without lots of reading.
+       
+     """,plugins,debugFunctionStubs=True,model_name="gpt-4o",temperature=0.0)
+    
+    #Try to be relatively brief and succinct. The target audience is DBAs and they'd rather not be lectured.
+    
+
+#Create app and serve up static files
+app = FastAPI(docs_url=None, redoc_url=None)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+initFChain(globalAgents.values())
+chatSettings=ChatSetup(guid="123",parameters={},plugins={})
+
+@app.post("/chatsetup/")
+def chat_setup(request: ChatSetup):
+    global chatSettings
+    global globalAgents
+    global globalAgentsDesc
+    chatSettings=request
+    chatSettings=ChatSetup.from_json(request.json())
+
+    #Setup fChain to use selected agents
+    agents=[]
+    for agent in chatSettings.plugins:
+        print(f"Adding Plugin {agent}")
+        agents.append(globalAgents[agent])
+    initFChain(agents)
+
+    #print request json 
+    #print(chatSettings.plugins)
+    #print(request.json())
+    return {"Status":"OK","Message":"Chat Setup Complete"}
+
+@app.post("/chat/")
+def chat_endpoint(request: ChatRequest):
+    global chatBot #chatBot.chat(request.user)
+    ret=chatBot.chat(request.user)
+    return {'message' : ret[0],'debug':ret[1]}
+
+@app.get("/")
+async def read_index(api_key):
+    if api_key!=app_api_key:
+        return HTMLResponse(content="<B>ACCESS DENIED</B>")
+        
+    # Read the HTML file content
+    with open('static/index.html', 'r', encoding='utf-8') as file:
+        html_content = file.read()
+
+    # Perform string replacements
+    global chatSettings
+    #html_content = html_content.replace('[mode]', chatSettings.mode)
+    #html_content = html_content.replace('[targetField]', chatSettings.targetField)
+    return HTMLResponse(content=html_content)
+
+@app.get("/availableagents")
+def available_agents():
+    global globalAgentsDesc
+    print("Sending Dictionary!")
+    return globalAgentsDesc
+
+#Not a chat function per-se but an Excel Lineage Plot function
+@app.post("/getLinkages/")
+def GetLinkagesTables(request:LinkageRequest):
+    #SDH TODO: All functions needs to check API key
+    #if request.api_key!=app_api_key:
+    #    return {"Status":"Error","Message":"Access Denied"}
+    
+    #Get Linkages
+    global iLineageSolver
+    return iLineageSolver.GetLinkages(request.tableName,request.fieldName)
+
+
+#--------------------------------------------------------------
+#Testing Area
+#--------------------------------------------------------------
+#GetFieldPrerequisite("TxnDetails","txn_amount")
+#print(RunSQLQuery("SELECT account_id, account_type FROM `CauslaitySampleData.Account_Facility` LIMIT 10"))
+#GetFieldPrerequisiteTables("AccountUsage","account_type")
+
+
+# print(RunSQLQuery("""SELECT 
+#   AU.account_type AS AccountUsage_type,
+#   AF.account_type AS AccountFacility_type,
+#   COUNT(*) AS count
+# FROM 
+#   CauslaitySampleData.AccountUsage AU
+# JOIN 
+#   CauslaitySampleData.Account_Facility AF
+# ON 
+#   AU.account_id = AF.account_id
+# GROUP BY 
+#   AU.account_type, AF.account_type
+# HAVING 
+#   AU.account_type != AF.account_type"""))
+
+
+
+#--------------------------------------------------------------
+#Bugs
+#--------------------------------------------------------------
+#RecursionError: maximum recursion depth exceeded
+#print (GetFieldPrerequisiteTables(tableName="AccountUsage",fieldName="account_type"))
+#print(RunSQLQuery("-- Query to get distinct account_type values from AccountUsage table\nSELECT DISTINCT account_type FROM `CauslaitySampleData.AccountUsage`"))
+
+#--------------------------------------------------------------
+
+# #Run webserver on thread
+import uvicorn
+import threading
+import logging
+threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=4040, log_level="debug")).start()
+
+
+

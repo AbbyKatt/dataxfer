@@ -1,0 +1,23 @@
+FROM google/cloud-sdk
+
+WORKDIR /usr/src/app
+
+# Install Python dependencies
+COPY requirements.txt ./
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy the source code
+COPY src/ ./
+COPY static/ ./static/
+
+RUN gcloud config set project datawx
+RUN gcloud config set run/region europe-west1
+
+# Declare the argument
+ARG OPENAI_API_KEY
+ENV OPENAI_API_KEY=${OPENAI_API_KEY}
+
+#ENV GOOGLE_APPLICATION_CREDENTIALS=/var/keys/abbykatdev.json
+
+CMD ["python3", "./chatbotserver.py"]

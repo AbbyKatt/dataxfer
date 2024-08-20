@@ -1,0 +1,187 @@
+#Graph Solver
+from dependencygraph import DependencyNode
+from typing import List
+
+class Linkage():
+    def __init__(self,TableFrom,FieldFrom,TableTo,FieldTo):
+        self.TableFrom=TableFrom
+        self.FieldFrom=FieldFrom
+        self.TableTo=TableTo
+        self.FieldTo=FieldTo
+
+    def to_Json(self):
+        return {
+            "TableFrom":self.TableFrom,
+            "FieldFrom":self.FieldFrom,
+            "TableTo":self.TableTo,
+            "FieldTo":self.FieldTo
+        }    
+
+class GraphAssociationResult():
+    def __init__(self):
+        self.TopNode=None
+        self.ExistingLinks={}   #Prevent infinite recursion
+        self.Tiers={}
+        self.MaxTier=0
+
+    def HasTraversed(self,Node):
+        return Node.GetFieldKey() in self.ExistingLinks
+        
+    def AddNodeToLayer(self,Node:DependencyNode,Tier):
+        if Tier not in self.Tiers:
+            self.Tiers[Tier]={}
+        if Tier>self.MaxTier:
+            self.MaxTier=Tier
+        tierVals=self.Tiers[Tier]
+        tierVals[Node.GetFieldKey()]=Node        
+        
+    #Produces a Natural Language report on the dependency tiers
+    def NLPDumpTiers(self,name="prerquisites"):
+        text=f"The field {self.TopNode.GetFieldKey()} has the following {name}:\n"
+        
+        if len(self.Tiers)==0:
+            return(f"No {name} found")
+        
+        #Dump nodes by tiers
+        hasResults=False
+        for i in range(self.MaxTier+1):
+            layer=self.Tiers[i]
+            text+=f"Tier {i} {name}\n"
+            for key in layer:
+                node=layer[key]
+                text+=f"\t{node.GetFieldKey()}\n"
+                hasResults=True
+
+        if not hasResults:
+            return(f"No {name} found")
+        
+        print(text)
+        return text
+            
+
+    #Produces a Natural Language report on the dependency tiers
+    def NLPDumpTiersTableNames(self,name="prerquisites"):
+        text=f"The field {self.TopNode.GetFieldKey()} has the following Table {name}:\n"
+
+        if len(self.Tiers)==0:
+            return(f"No {name} found")
+        
+        #Dump nodes by tiers
+        hasResults=False
+        for i in range(self.MaxTier+1):
+            layer=self.Tiers[i]
+            text+=f"Tier {i} {name}\n"
+            for key in layer:
+                node=layer[key]
+                text+=f"\t{node.TableName}\n"
+                hasResults=True
+            
+        if not hasResults:
+            return(f"No {name} found")
+        
+        print(text)
+        return text
+
+            
+    #Dumps the last last tier
+    def NLPUltimateNodes(self,Name):
+        layer=self.Tiers[self.MaxTier]
+        print(f"Final {Name} for {self.TopNode.GetFieldKey()}:")
+        for key in layer:
+            node=layer[key]
+            print(f"\t{node.GetFieldKey()}")
+        
+
+#Solver class for the graph -> walks left and right and does other function (like give ultimate inputs/outputs)
+class GraphSolver:
+    
+    def __init__(self,NodeGraph):
+        self.NodeGraph=NodeGraph
+
+    def LeftWalk(self,Node,results:GraphAssociationResult,currentTier=0):
+        # print(f"Left Walk {Node.GetFieldKey()}")
+        # print(f"Tier {currentTier}")
+        # print(f"Existing Links {results.ExistingLinks}")
+
+        # if currentTier==2:
+        #     print("DEBUG BAILING")
+        #     return
+        
+        for key in Node.LeftNodes:
+            node=Node.LeftNodes[key]           
+            
+            if results.HasTraversed(node):
+                print(f"Skipping {node.GetFieldKey()} as already traversed")
+                continue
+            else:
+                #Stop loops!
+                results.ExistingLinks[node.GetFieldKey()]=node
+
+                #print(f"\tLeft Node {node.GetFieldKey()}")
+                results.AddNodeToLayer(node,currentTier)                                
+                self.LeftWalk(node,results,currentTier+1)
+                
+    #Like LEFT walk but returns a list of linkages
+    def LeftLinkageWalk(self,Node,results:GraphAssociationResult,Linkages:List,currentTier=0):
+        # print(f"Left Walk {Node.GetFieldKey()}")
+        # print(f"Tier {currentTier}")
+        # print(f"Existing Links {results.ExistingLinks}")
+
+        # if currentTier==2:
+        #     print("DEBUG BAILING")
+        #     return
+        
+        for key in Node.LeftNodes:
+            node=Node.LeftNodes[key]           
+            
+            if results.HasTraversed(node):
+                print(f"Skipping {node.GetFieldKey()} as already traversed")
+                continue
+            else:
+                #Stop loops!
+                results.ExistingLinks[node.GetFieldKey()]=node
+
+                #Create Linkage
+                Link=Linkage(Node.TableName,Node.FieldName,node.TableName,node.FieldName)
+                Linkages.append(Link.to_Json())
+                print(f"Linkage: {Link.to_Json()}")
+
+                #print(f"\tLeft Node {node.GetFieldKey()}")
+                results.AddNodeToLayer(node,currentTier)                                
+                self.LeftLinkageWalk(node,results,Linkages,currentTier+1)
+
+    def RightWalk(self,Node,results:GraphAssociationResult,currentTier=0):
+        #print(f"Right Walk {Node.GetFieldKey()}")
+        for key in Node.RightNodes:
+            node=Node.RightNodes[key]
+            
+            if results.HasTraversed(node):
+                print(f"Skipping {node.GetFieldKey()} as already traversed")
+                continue
+            else:
+                #Stop loops!
+                results.ExistingLinks[node.GetFieldKey()]=node
+                
+                #print(f"\tRight Node {node.GetFieldKey()}")
+                results.AddNodeToLayer(node,currentTier)
+                self.RightWalk(node,results,currentTier+1)
+
+    def GetPrerequisites(self,StartNode):
+        results=GraphAssociationResult()
+        results.TopNode=StartNode
+        self.LeftWalk(StartNode,results,currentTier=0)
+        return results
+    
+    def GetDependencies(self,StartNode):
+        results=GraphAssociationResult()
+        results.TopNode=StartNode
+        self.RightWalk(StartNode,results,currentTier=0)
+        return results
+    
+    def GetLinkages(self,StartNode):
+        results=GraphAssociationResult()
+        results.TopNode=StartNode
+        Linkages=[]
+        self.LeftLinkageWalk(StartNode,results,Linkages,currentTier=0)
+        return Linkages
+

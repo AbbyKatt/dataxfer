@@ -1,0 +1,526 @@
+#Fchain 0.1.1 -> Added None Check to Content for AddMessage so Functions dont poison history with NULLs
+#Added timeout to second GPT call -> this needs refactoring and also fixed in async
+
+#fChain code
+#Prototype for fChain
+#Simple OpenAI function based chatbot
+import openai
+import json
+import os
+from pathlib import Path
+import errno
+
+#---------------------------------------------------------------------------------
+# cChain simple directory based logging
+#---------------------------------------------------------------------------------
+class fChainLog():
+    def __init__(self,logFileDirectory):
+        self.logFlogFileDirectory=logFileDirectory
+
+        if logFileDirectory is None:
+            return
+
+        #Recursively try to make the directory if it doesn't exist
+        try:
+            os.makedirs(logFileDirectory)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise e
+        
+        # #Create log file
+        # self.logFile = open(logFileDirectory+"/log.txt", "w")
+        # self.logFile.write("Log file created\n")
+        # self.logFile.close()
+
+    def Log(self,role,message,function_name,function_args):
+        
+        #Check self logging not none
+        if self.logFlogFileDirectory is None:
+            return
+
+        #Make a unique filename with date and timestamp
+        import datetime
+        now = datetime.datetime.now()
+        filename="Log_"+ role + "_" + now.strftime("%Y-%m-%d_%H-%M-%S-%f") + ".txt"
+
+        #Create log file/write
+        self.logFile = open(os.path.join(self.logFlogFileDirectory,filename), "a")
+        self.logFile.write("role: "+role+"\n")
+        self.logFile.write("function_name: "+function_name+"\n")
+        self.logFile.write("function_args: "+str(function_args)+"\n")
+        self.logFile.write("message: "+str(message)+"\n")
+        self.logFile.close()
+
+#---------------------------------------------------------------------------------
+# fChain main class
+#---------------------------------------------------------------------------------
+class ObjectResponse():
+    def __init__(self,object,TextHistory=None,EndChain=False):
+        self.object=object
+        self.TextHistory=TextHistory
+        self.EndChain=EndChain
+
+class TextResponse():
+    def __init__(self,text):
+        self.text=text
+
+class fChain():
+
+    #Static function initializer
+    @staticmethod
+    def fromState(state):
+        state=json.loads(state)
+        chatbot=fChain("",model_name=state["model"],temperature=state["temperature"])
+        chatbot.messages=state["chatHistory"]
+        return chatbot
+
+    def __init__(self,SystemPrompt,functionList=None,
+                 debug=False,debugFunctions=False,debugFunctionStubs=False,
+                 logDir=None,
+                 nameChatBot="assistant",nameUser="user",
+                 model_name = "gpt-3.5-turbo",
+                 temperature=0.2,
+                 timeout=30,
+                 retries=3):
+        
+        if functionList is None:
+            self.functions=None
+        else:
+            self.functions={func.openai_schema["name"]: func for func in functionList}
+        
+        self.messages=[]
+        self.nameChatBot=nameChatBot
+        self.nameUser=nameUser
+        self.model_name=model_name
+        self.temperature=temperature
+        openai.api_key = os.environ["OPENAI_API_KEY"]
+        self.debug=debug
+        self.debugFunctions=debugFunctions
+        self.debugFunctionStubs=debugFunctionStubs
+        self.totalTokens=0
+        self.timeout=timeout
+        self.retries=retries
+
+        #End state for emitted objects
+        self.emitedObject=None
+
+        #Setup logging
+        self.Logging=fChainLog(logDir)
+
+        #Load in SystemPrompt
+        self.SystemPrompt=SystemPrompt
+        self.addMessage(SystemPrompt,role="system")
+
+    #Get serializable message history json
+    def getState(self):
+        state={"chatHistory":self.messages,"model":self.model_name,"temperature":self.temperature}
+        return json.dumps(state)
+
+    #Add message into the message queue
+    def addMessage(self,content,role="user",function_name=None):
+        if function_name is not None:
+            self.messages.append({"role": "function","name":function_name, "content": content})
+            self.Logging.Log("function_call","",function_name,content)
+        elif content is not None:
+            self.messages.append({"role": role, "content": content})
+            self.Logging.Log(role,content,"","")
+        else:
+            print("WARNING: Tried to add None to message history!")
+
+    def getMessages(self):
+        return self.messages
+    
+    def configureAzure(self,apibase,apiversion,apikey):
+        import openai
+        openai.api_type = "azure"
+        openai.api_base = apibase
+        openai.api_version = apiversion
+        openai.api_key = apikey
+        return True
+    
+    #List every function inside of a class instance with the openai_function decorator
+    @staticmethod
+    def EnumerateClassFunctions(instance):
+        #Call functions on instance and get the openai_schema
+        classfunctions=[func for func in dir(instance) if hasattr(getattr(instance,func), 'openai_schema')]
+        return [getattr(instance,func) for func in classfunctions]
+
+    #Lists top-level global functions (simple programs and jupyter notebooks)
+    @staticmethod
+    def EnumerateGlobalFunctions():
+        return [func for func in globals().values() if hasattr(func, 'openai_schema')]
+
+    #Gets the schema for passed in functions
+    def getFunctionSchema(self):
+        schemas=[]
+        if self.functions is not None:
+            for aFunc in self.functions:
+                schemas.append(self.functions[aFunc].openai_schema)
+            return schemas
+        else:
+            return None
+    
+    def formatFunctionCall(self,function_name,arguments):
+        argumentsString=""
+        arguments=json.loads(arguments)
+        for key in arguments:
+            argumentsString+=str(key)+"="+str(arguments[key])+","
+        argumentsString=argumentsString[:-1]
+        #argumentsString = ','.join([key + '=' + str(arguments[key]) for key in arguments])
+        return function_name + "(" + argumentsString + ")"
+
+    #Uses OpenAI to generate a completion, handles timeout and automatic retry seamlessly
+    def getCompletion(self,attempt=1):
+        try:
+            if self.functions is None:
+                response = openai.ChatCompletion.create(
+                    model=self.model_name,
+                    temperature=self.temperature,
+                    messages=self.messages,
+                    request_timeout=self.timeout,
+                )
+            else:
+                response = openai.ChatCompletion.create(
+                    model=self.model_name,
+                    functions=self.getFunctionSchema(),
+                    temperature=self.temperature,
+                    messages=self.messages,
+                    request_timeout=self.timeout,
+                )
+            return response
+        except Exception as e:
+            print(f"OPENAI ERROR: {type(e)} attempt [{attempt}] / {self.retries}")
+            if attempt>=self.retries:
+                print(f"Max retries reached [{attempt}]")
+                raise e
+            else:
+                return self.getCompletion(attempt=attempt+1)
+
+
+    def safeFunctionResponse(self,function,response):
+        try:
+            ret=function.from_response(response)
+            print("Function Response: -------------------")
+            print(ret)
+            print("-----------------------------------------")
+            return (ret,None)
+        except Exception as e:
+            #Get traceback
+            import traceback
+            tb=traceback.format_exc()
+            errMsg=f"Error in function call: {e}:\n {tb}"
+            print(errMsg)
+            return (None,errMsg)
+
+    def chat(self,userMessage,role="user"):
+        #Add messge to list
+        self.addMessage(userMessage,role=role)
+        
+        #get response passing in functions schemas
+        response=self.getCompletion()
+
+        if self.debug:
+            print("------------------ GPT RESPONSE ------------------") 
+            print(response)
+            print("------------------ END RESPONSE ------------------\n")
+
+        #Prevent infinite loop - GPT 3.5 turbo sometimes likes to call the same function over and over and over :/
+        maxLoops=10
+        currLoop=1
+        self.totalTokens=response.usage.total_tokens
+
+        #Loop until all functions have been called
+        debugMsgs=[]
+        finish_reason=response.choices[0].finish_reason
+        while finish_reason=="function_call":
+
+            #Get function name/run it/get response
+            function_name=response.choices[0].message["function_call"]["name"]
+            arguments=response.choices[0].message["function_call"]["arguments"]
+
+            if self.debug or self.debugFunctionStubs:
+                try:
+                    debugFuncMsg=self.formatFunctionCall(function_name,arguments)
+                    print("Running Function: ["+debugFuncMsg+"]")
+                    self.Logging.Log("function_call","",function_name,debugFuncMsg)
+                    if self.debugFunctionStubs:
+                        debugMsgs.append(debugFuncMsg)
+                except Exception as e:
+                    print(f"Error in function call: {e}")
+                    debugMsgs.append(f"Error in function call [{function_name}] : {e}")
+
+            #Run the function and get respnse
+            hasError=False
+            errorMesg=""
+            #SDH MAJOR ISSUES - "Function name needs to be validated (it came back as "python") at one point!
+            if function_name not in self.functions:
+                hasError=True
+                errorMesg=f"Function [{function_name}] not found in function list"
+            else:
+                #SDH MAJOR ISSUES - We need better handling if we get a whacky function calling response
+                function=self.functions[function_name]
+                function_response,errorMesg=self.safeFunctionResponse(function,response)
+
+            #Sometimes AI makes bad JSON requests that are unparsable. Very sad.
+            if errorMesg is not None or hasError==True:
+                
+                #Does this retry mechanism work
+                print(errorMesg)
+                
+                #Put response in messages queue
+                #self.addMessage(function_response,role="user",function_name=f"Unable to call [{function_name}]")
+                self.addMessage(f"Unable to call [{function_name}]",role="user")
+
+                #Invoke GPT with message history, list of callable functions and schemas and the current message
+                response = openai.ChatCompletion.create(model=self.model_name,
+                                            functions=self.getFunctionSchema(),
+                                            messages=self.messages,
+                                            request_timeout=self.timeout)                
+                
+                
+                #return [errorMesg,"",""]
+            else:
+
+                #Check if the function_response is a tuple
+                #A tuple signals an END to the chain with the final object emitted
+                if isinstance(function_response, tuple):
+                    function_response,emitedObject=function_response
+                    self.emitedObject=emitedObject
+                    object_type=type(emitedObject).__name__
+                    if self.debug:            
+                        print(f"Function [{function_name}] Emitted Final Object [{object_type}]  / Ending Chain")
+                    
+                    #Chuck message response in queue and end loop
+                    self.addMessage(function_response,role="function",function_name=function_name)
+                    break
+
+                #Format json string nicely and human readable   
+                if self.debugFunctions:
+                    #Check if function response is a string
+                    if isinstance(function_response, str):
+                        print(f"[{function_name}] : {function_response}")
+                    else:
+                        print(f"[{function_name}] reponse:")
+                        print(json.dumps(json.loads(function_response), indent=4, sort_keys=True))
+                if self.debug:            
+                    print("FINISHED: ["+function_name +"]")
+
+                #Put response in messages queue
+                self.addMessage(function_response,role="function",function_name=function_name)
+
+                #Invoke GPT with message history, list of callable functions and schemas and the current message
+                response = openai.ChatCompletion.create(model=self.model_name,
+                                            functions=self.getFunctionSchema(),
+                                            messages=self.messages,
+                                            request_timeout=self.timeout)
+            #response=self.getCompletion()
+            
+
+            if self.debug:
+                print("------------------ GPT RESPONSE ------------------") 
+                print(response)
+                print("------------------ END RESPONSE ------------------\n")
+        
+            if currLoop>maxLoops:
+                print("Max loops reached!")
+                break
+            
+            #Increment loop counter + get finish reason
+            currLoop+=1
+            finish_reason=response.choices[0].finish_reason
+
+        #We're done - chuck the response in the messages queue
+        messagetext=response.choices[0].message.content
+        self.totalTokens=response.usage.total_tokens
+        self.addMessage(messagetext,role="assistant")
+        return (messagetext,debugMsgs)
+
+    #Runs a chain until an ending function emits a final object
+    def runchain(self,userMessage):
+        #Already have an object?
+        if self.emitedObject is not None:
+            print("Already have a final emitted object")
+            return self.emitedObject
+        
+        #Run the chain
+        ret=self.chat(userMessage)
+        return self.emitedObject
+
+    #Uses the AI to summarize the conversation then makes that the new message history reducing the token count
+    def Compact(self):
+        self.Logging.Log("compact","","","")        
+        print("***Compacting chat history***")
+        compactPrompt="Can you give me a brief summary of the conversation so in the third person narrative of both speakers?"
+        ret=self.chat(compactPrompt,role="system")
+        if self.debug:
+            print("------------------ COMPACT SUMMARY ------------------") 
+            print(ret)
+            print("\n------------------ END SUMMARY ------------------\n")
+
+        #Reset chat history
+        self.messages=[]
+        self.addMessage(self.SystemPrompt,role="system")
+        self.addMessage("Please give me a summary of our current chat:")
+        self.addMessage(ret,role="assistant")
+
+        return ret
+
+    #Uses OpenAI to generate a completion, handles timeout and automatic retry seamlessly
+    async def aGetCompletion(self,attempt=1):
+        try:
+            if self.functions is None:
+                response = await openai.ChatCompletion.acreate(
+                    model=self.model_name,
+                    temperature=self.temperature,
+                    messages=self.messages,
+                    request_timeout=self.timeout,
+                )
+            else:
+                response = await openai.ChatCompletion.acreate(
+                    model=self.model_name,
+                    functions=self.getFunctionSchema(),
+                    temperature=self.temperature,
+                    messages=self.messages,
+                    request_timeout=self.timeout,
+                )
+            return response
+        except Exception as e:
+            print(f"aGetCompletion - ERROR: {type(e)} attempt [{attempt}] / [{self.retries}]")
+            if attempt>=self.retries:
+                print(f"aGetCompletion Max retries reached [{attempt}]")
+                raise e
+            else:
+                return await self.aGetCompletion(attempt=attempt+1)
+
+
+    async def achat(self,userMessage,role="user"):
+        #Add messge to list
+        self.addMessage(userMessage,role=role)
+        
+        #get response passing in functions schemas
+        response=await self.aGetCompletion()
+
+        if self.debug:
+            print("------------------ GPT RESPONSE ------------------") 
+            print(response)
+            print("------------------ END RESPONSE ------------------\n")
+
+        #Pevent infinite loop
+        maxLoops=10
+        currLoop=1
+        self.totalTokens=response.usage.total_tokens
+
+        #Loop until all functions have been called
+        debugMsgs=[]
+        finish_reason=response.choices[0].finish_reason
+        while finish_reason=="function_call":
+
+            #Get function name/run it/get response
+            function_name=response.choices[0].message["function_call"]["name"]
+            arguments=response.choices[0].message["function_call"]["arguments"]
+
+            if self.debug or self.debugFunctionStubs:
+                debugFuncMsg=self.formatFunctionCall(function_name,arguments)
+                print("Running Function: ["+debugFuncMsg+"]")
+                self.Logging.Log("function_call","",function_name,debugFuncMsg)
+                if self.debugFunctionStubs:
+                    debugMsgs.append(debugFuncMsg)
+
+            function=self.functions[function_name]
+            function_response=function.from_response(response)
+
+            #Check if the functio_response is a tuple
+            #A tuple signals an END to the chain with the final object emitted
+            if isinstance(function_response, tuple):
+                function_response,emitedObject=function_response
+                self.emitedObject=emitedObject
+                object_type=type(emitedObject).__name__
+                if self.debug:            
+                    print(f"Function [{function_name}] Emitted Final Object [{object_type}]  / Ending Chain")
+                
+                #Chuck message response in queue and end loop
+                self.addMessage(function_response,role="function",function_name=function_name)
+                break
+
+            #Format json string nicely and human readable   
+            if self.debugFunctions:
+                print(json.dumps(json.loads(function_response), indent=4, sort_keys=True))
+            if self.debug:            
+                print("FINISHED: ["+function_name +"]")
+
+            #Put response in messages queue
+            self.addMessage(function_response,role="function",function_name=function_name)
+
+            #Invoke GPT with message history, list of callable functions and schemas and the current message
+            response = await openai.ChatCompletion.acreate(model=self.model_name,
+                                        functions=self.getFunctionSchema(),
+                                        messages=self.messages)
+            #response = await self.aGetCompletion()
+
+            if self.debug:
+                print("------------------ GPT RESPONSE ------------------") 
+                print(response)
+                print("------------------ END RESPONSE ------------------\n")
+        
+            if currLoop>maxLoops:
+                print("Max loops reached!")
+                break
+            
+            #Increment loop counter + get finish reason
+            currLoop+=1
+            finish_reason=response.choices[0].finish_reason
+
+        #We're done - chuck the response in the messages queue
+        messagetext=response.choices[0].message.content
+        self.totalTokens=response.usage.total_tokens
+        self.addMessage(messagetext,role="assistant")
+        return (messagetext,debugMsgs)
+
+#---------------------------------------------------------------------------------
+# JSON Loading of Knowledge Base as a semantic vectorstore
+#---------------------------------------------------------------------------------
+#Third version with configurable collection buckets
+class fChainVectorDB():
+    def __init__(
+        self,
+        file_path
+        ):
+        self.file_path = Path(file_path).resolve()
+        
+    #Reads a custom JSON and inserts it into multiple collections in chroma with metadata
+    #returns chromaDB instance
+    def load(self):
+        vectorCollections={}
+        # Load JSON file
+        with open(self.file_path) as file:
+            data = json.load(file)
+            for item in data:
+                collection=item['collection']
+                metadata=item['metadata']
+                page_content=item['chunk']
+
+                #if collection is not in vectorCollections, add it
+                if collection not in vectorCollections:
+                    vectorCollections[collection]=[]
+                #add the page content and metadata to the collection
+                vectorCollections[collection].append((page_content,metadata))
+
+        #Setup local client        
+        client = chromadb.Client()
+        
+        for colName in vectorCollections:
+            collection = client.create_collection(colName)
+            #take each tuple from list data and turn it into new lists docs and metas
+            docs = [x[0] for x in vectorCollections[colName]]
+            metas = [x[1] for x in vectorCollections[colName]]
+            idx = ["Doc_{0}".format(i) for i in range(len(vectorCollections[colName]))]
+
+            # Add docs to the collection. Can also update and delete. Row-based API coming soon!
+            collection.add(
+                documents=docs,
+                metadatas=metas,
+                ids=idx, # unique for each doc
+            )
+
+        return client        
+

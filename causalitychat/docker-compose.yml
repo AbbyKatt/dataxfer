@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  entitystoreapi:
+    image: datawx/causalitychat
+    volumes:
+      - /home/keys:/var/keys
+    restart: always
+    ports:
+      - "4040:4040"
+    networks:
+      - es_network
+    environment:
+      - admin_api_key=admin_api_key
+      - vector_service_name=datawx-vectordb
+      - OPENAI_API_KEY=$OPENAI_API_KEY
+      - GOOGLE_APPLICATION_CREDENTIALS=/var/keys/abbykatdev.json
+      - app_api_key=app_api_key
+
+networks:
+  es_network:
+    driver: bridge

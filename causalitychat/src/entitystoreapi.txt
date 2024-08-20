@@ -1,0 +1,124 @@
+#EntityStore API
+import json
+from typing import List
+
+class AuditHistory:
+
+    def __init__(self,author="",timestamp="",description=""):
+        self.author = author
+        self.timestamp = timestamp
+        self.description = description
+    
+    def to_Json(self):
+        return {
+            "author":self.author,
+            "timestamp":self.timestamp,
+            "description":self.description
+        }
+    
+    @staticmethod
+    def from_Json(jsonStr):
+        self = AuditHistory()
+        self.author = jsonStr["author"]
+        self.timestamp = jsonStr["timestamp"]
+        self.description = jsonStr["description"]
+        return self
+
+#Search result from Dir command
+class DirResult():
+
+    def __init__(self,uuid,Name):
+        self.uuid = uuid
+        self.Name = Name
+
+    def to_Json(self):
+        return {
+            "uuid":self.uuid,
+            "Name":self.Name
+        }
+    
+    def from_Json(self,jsonStr):
+        self.uuid = jsonStr["uuid"]
+        self.Name = jsonStr["Name"]
+
+#Individual records/simple storage class
+class MetaRecord:
+
+    def __init__(self,uuid="",name="",entityType="",author="",latestUpdate="",keys={},dataFields={},changeHistory=""):
+        self.uuid = uuid
+        self.name = name
+        self.entityType = entityType
+        self.author = author
+        self.latestUpdate = latestUpdate
+        self.changeHistory=changeHistory
+        self.keys = keys
+        self.dataFields = dataFields
+        self.metadata = {}
+
+    def to_Json(self):
+        return {
+            "uuid":self.uuid,
+            "name":self.name,
+            "entityType":self.entityType,
+            "keys":json.dumps(self.keys),
+            "author":self.author,
+            "changeHistory":self.changeHistory,
+            "latestUpdate":self.latestUpdate,
+            "dataFields":json.dumps(self.dataFields),
+            "MetaData":json.dumps(self.metadata) if self.metadata else ""
+        }
+    
+    @staticmethod
+    def from_Json(jsonStr):
+        self = MetaRecord()
+        self.uuid = jsonStr["uuid"]
+        self.name = jsonStr["name"]
+        self.entityType = jsonStr["entityType"]
+        self.author = jsonStr["author"]
+        self.changeHistory = jsonStr["changeHistory"]
+        self.latestUpdate = jsonStr["latestUpdate"]
+
+        #Load JSON strings into dictionaries
+        self.keys = {} if "keys" not in jsonStr or not jsonStr["keys"] else json.loads(jsonStr["keys"])                  
+        self.dataFields = {} if "dataFields" not in jsonStr or not jsonStr["dataFields"] else json.loads(jsonStr["dataFields"])
+        self.metadata = {} if "MetaData" not in jsonStr or not jsonStr["MetaData"] else json.loads(jsonStr["MetaData"])
+        return self
+    
+    #REST API class for Entity Store -> to be AI converted into VBA classes
+import requests
+
+class EntityStoreRESTAPI:
+
+    def __init__(self,baseurl,apikey):
+        self.baseurl = baseurl
+        self.api_key = apikey
+
+    def api_dir(self,EntityType:str,keys={})->List:
+        url=f"{self.baseurl}/EntityStoreDir"
+        response = requests.post(url, params={"EntityType": EntityType,"api_key":self.api_key},json={"keys":keys})
+        response.raise_for_status()
+        return [DirResult(itm["uuid"], itm["Name"]) for itm in response.json()]
+
+    def api_pull(self,EntityType:str,keys={})->List:
+        url=f"{self.baseurl}/EntityStorePull"
+        response = requests.post(url, params={"EntityType": EntityType,"api_key":self.api_key},json={"keys":keys})
+        #print(response.json())
+        response.raise_for_status()
+        return [MetaRecord.from_Json(itm) for itm in response.json()]
+
+    def api_history(self,UUID):
+        url=f"{self.baseurl}/EntityStoreHistory"
+        response = requests.post(url, params={"UUID": UUID,"api_key":self.api_key})
+        response.raise_for_status()
+        return [AuditHistory.from_Json(itm) for itm in response.json()]
+    
+    def api_push(self,records:List,author):
+        url=f"{self.baseurl}/EntityStorePush"
+        json=[itm.to_Json() for itm in records]
+        print(json)
+        response = requests.post(url, params={"api_key":self.api_key,"author":author},json=json)
+        print(response)
+        response.raise_for_status()
+        return response.json()
+
+

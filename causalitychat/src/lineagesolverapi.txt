@@ -1,0 +1,155 @@
+#LineageSolverAPI class -> solves dependencies between fields
+import pandas as pd
+from entitystoreapi import EntityStoreRESTAPI
+from dependencygraph import DependencyGraph,DependencyNode
+from graphsolver import GraphSolver
+import json
+
+class LineageSolverAPI():
+    
+    def __init__(self,EntityStoreURL,api_key,tableUUID):
+        self.EntStoreURL=EntityStoreURL
+        self.api_key=api_key
+        self.tableUUID=tableUUID
+        self.NodeGraph=None
+        self.Solver=None
+    
+    #Wrangle the potentially unreliable metadata field
+    def MetaWrangleDep(self,meta):
+        try:
+            dep=meta["Dependencies"]
+            return json.dumps(dep) if dep else ""
+        except:
+            return ""
+
+    def MetaWrangleLinks(self,meta):
+        try:
+            dep=meta["LinkFields"]
+            return json.dumps(dep) if dep else ""
+        except:
+            return ""
+        
+    def GracefulJSON(self,jsonStr):
+        try:
+            return json.loads(jsonStr)
+        except:
+            return []
+    
+    def LoadGraph(self):
+        #Load data from EntityStore into a dataframe
+        entStore=EntityStoreRESTAPI(self.EntStoreURL,self.api_key)
+
+        #Load this specific fields for this table
+        entities=entStore.api_pull("Field",{"TableUUID":self.tableUUID})
+        rows=[]
+        for metaRec in entities:
+            datafields=metaRec.dataFields
+            datafields["uuid"]=metaRec.uuid
+            datafields["metadata"]=metaRec.metadata
+            rows.append(datafields)
+
+        #Turn rows into a DataFrame
+        df=pd.DataFrame(rows)
+        #df.head()
+
+        #Wrangle data into a graph format for loading
+        TargetTable=df["Target Table"]
+        TargetField=df["Target Field"]
+        SourceTable=df["Source Table"]
+
+        #Depdencies from the metadata
+        MetaData=df["metadata"]
+        Dependencies=[self.MetaWrangleDep(meta) for meta in MetaData]
+        LinkFields=[self.MetaWrangleLinks(meta) for meta in MetaData]
+
+        #Build new dataframe
+        dfGraph=pd.DataFrame({"TableName":TargetTable,"FieldName":TargetField,"Dependencies":Dependencies,"LinkingFields":LinkFields,"SourceTable":SourceTable})
+        dfGraph.head()
+        
+        #Stage 1 of Graph Solver: Registration
+        NodeGraph=DependencyGraph()
+        for iter,row in dfGraph.iterrows():
+            TableName=row["TableName"]
+            FieldName=row["FieldName"]
+            Dependencies=row["Dependencies"]
+            LinkingFields=row["LinkingFields"]
+            SourceTable=row["SourceTable"]
+            
+            #Adding node - at this point Depdencies and LinkingFields are just list of strings in form TableName.FieldName
+            #Sometimes without TableName -> MagicFieldSplit will try to guess the table name
+            node=DependencyNode(TableName,FieldName,self.GracefulJSON(Dependencies),self.GracefulJSON(LinkingFields),SourceTable=SourceTable)
+            NodeGraph.AddNode(node)      
+            
+        #Stage 2 of Graph Solver: Left-Linking
+        #Promotes the loose string dependencies into actual node dependencie
+        #LeftNodes and LeftLinkNodes are now lists of actual node instances
+        NodeGraph.LeftLinkNodes()
+
+        #Stage 3: use the validated ad linked left side nodes to call the RightLinkNodes function
+        #think of this as the neighbour to the the right of you calling you up to say they depend on you :)
+        NodeGraph.RightLinkNodes()
+  
+        #Done
+        self.NodeGraph=NodeGraph
+        self.Solver=GraphSolver(NodeGraph)  
+
+    def GetFieldPrerequisite(self,tableName,fieldName):
+        
+        tabledotfield=f"{tableName}.{fieldName}"
+        if tabledotfield not in self.NodeGraph.nodes:
+            return f"Field {tabledotfield} not found in the dependency graph, enter correct tablename and fieldname"
+        
+        #Do a walk and return NLP result
+        node=self.NodeGraph.nodes[tabledotfield]
+        result=self.Solver.GetPrerequisites(node)
+        return result.NLPDumpTiers("Prerequisites")
+
+
+    def GetFieldDependencies(self,tableName,fieldName):
+        
+        tabledotfield=f"{tableName}.{fieldName}"
+        if tabledotfield not in self.NodeGraph.nodes:
+            return f"Field {tabledotfield} not found in the dependency graph, enter correct tablename and fieldname"
+        
+        #Do a walk and return NLP result
+        node=self.NodeGraph.nodes[tabledotfield]
+        result=self.Solver.GetDependencies(node)
+        return result.NLPDumpTiers("Dependencies")
+
+    def GetFieldPrerequisiteTables(self,tableName,fieldName):
+        
+        tabledotfield=f"{tableName}.{fieldName}"
+        if tabledotfield not in self.NodeGraph.nodes:
+            return f"Field {tabledotfield} not found in the dependency graph, enter correct tablename and fieldname"
+        
+        #Do a walk and return NLP result
+        node=self.NodeGraph.nodes[tabledotfield]
+        result=self.Solver.GetPrerequisites(node)
+        return result.NLPDumpTiersTableNames("Prerequisites")
+
+    def GetFieldDependentTables(self,tableName,fieldName):
+        
+        tabledotfield=f"{tableName}.{fieldName}"
+        if tabledotfield not in self.NodeGraph.nodes:
+            return f"Field {tabledotfield} not found in the dependency graph, enter correct tablename and fieldname"
+        
+        #Do a walk and return NLP result
+        node=self.NodeGraph.nodes[tabledotfield]
+        result=self.Solver.GetDependencies(node)
+        return result.NLPDumpTiersTableNames("Dependencies")
+
+    #Get a list of From=>To linkages
+    def GetLinkages(self,tableName,fieldName):
+        
+        tabledotfield=f"{tableName}.{fieldName}"
+        if tabledotfield not in self.NodeGraph.nodes:
+            #return f"Field {tabledotfield} not found in the dependency graph, enter correct tablename and fieldname"
+            return []
+        
+        #Do a walk and return NLP result
+        node=self.NodeGraph.nodes[tabledotfield]
+        result=self.Solver.GetLinkages(node)
+        return result
+
+
+    

@@ -1,0 +1,158 @@
+#Graph Solver
+
+class DependencyNode():
+    def __init__(self,TableName,FieldName,Dependencies=[],LinkingFields=[],Type="Field",SourceTable="AI_Missing_Table"):
+        self.TableName=TableName
+        self.FieldName=FieldName
+        self.Dependencies=Dependencies
+        self.LinkingFields=LinkingFields
+        self.Type=Type
+        self.SourceTable=SourceTable
+        
+        #Compute linkage to other nodes class instances (by key)
+        self.LeftNodes={}
+        self.LeftLinkNodes={}
+        self.RightNodes={}
+        self.RightLinkNodes={}
+        
+        #Deduplication
+        self.ExistingLinkages={}
+        
+    def GetFieldKey(self):
+        return f"{self.TableName}.{self.FieldName}"
+    
+    #Build up deduplication on the left side data
+    def BuildDeduplicationFromLeft(self):
+        for key in self.LeftNodes:
+            node=self.LeftNodes[key]
+            if node.GetFieldKey() not in self.ExistingLinkages:
+                self.ExistingLinkages[node.GetFieldKey()]=node
+
+    #Right link linkage 
+    def AddRightSideLinkageDeduplicated(self,RightNode,isLink=False):
+        rightKey=RightNode.GetFieldKey()
+        if rightKey in self.ExistingLinkages:
+            print(f"Right Linkage {rightKey} already exists")
+            return
+        else:
+            #Update deduplication + add to right nodes
+            #print(f"Adding Right Linkage {rightKey}")
+            self.ExistingLinkages[rightKey]=RightNode
+            self.RightNodes[rightKey]=RightNode
+            if isLink:
+                self.RightLinkNodes[rightKey]=RightNode          
+            
+
+        
+class DependencyGraph():
+    def __init__(self):
+        self.nodes={}
+    
+    def AddNode(self,node:DependencyNode):
+        key=node.GetFieldKey()
+        if not key in self.nodes:
+            self.nodes[key]=node
+        else:
+            print(f"Node {key} already exists")
+    
+    def GetFieldKey(self,TableName,FieldName):
+        node=DependencyNode(TableName,FieldName)
+        return node.GetFieldKey()
+
+    #Split a Table.Field string into it's components, fallbacks to using a default table if no table is found
+    def MagicSplitFields(self,node:DependencyNode,FieldNotation):
+        splitStr=FieldNotation.split(".")
+        if len(splitStr)==2:
+            return (splitStr[0],splitStr[1])
+        elif len(splitStr)==1:
+            #Name not fully qualified, assume it's the source table
+            return (node.SourceTable,splitStr[0])
+        else:
+            return ("AI_Missing_Table","AI_Missing_Field")
+
+    #Function to link all nodes together
+    def GetLeftLinkNodes(self,linkingName,node,dependencies):
+        #Walk over every node, linking as we go
+        missingNodes=0
+        linkedNodes=0
+        inputNodes=0
+        leftNodes={}
+            
+        #Build left-side dependency links
+        for dep in dependencies:
+            depTable,depField=self.MagicSplitFields(node,dep)
+            depKey=self.GetFieldKey(depTable,depField)
+            #print(f"Linking {key} with {depKey}")
+            if depKey in self.nodes:
+                #Direct link
+                leftNodes[depKey]=self.nodes[depKey]
+                linkedNodes+=1
+            else:
+                #Dummy link for missing dependency
+                #get first 3 characters of table name
+                if depTable[:3]=="in_":
+                    #print(f"Missing {linkingName} Dependency {depKey}, creating Input Node")
+                    dummyNode=DependencyNode(depTable,depField,Type="Input")
+                    inputNodes+=1    
+                else:
+                    print(f"Missing {linkingName} Dependency {depKey}, creating Dummy Node")
+                    dummyNode=DependencyNode(depTable,depField,Type="Dummy")    
+                    missingNodes+=1
+                leftNodes[depKey]=dummyNode
+                
+
+        return leftNodes,linkedNodes,missingNodes,inputNodes
+            
+    #Verifies and links all nodal (left-side) dependency linkages 
+    #if a node isn't found a dummy node is created to represent it
+    #Chuck warnings/stats/errors so we can see how the AI solver did
+    def LeftLinkNodes(self):
+        
+        #Walk over every dependency node, linking as we go
+        missingNodes=0
+        linkedNodes=0
+        inputNodes=0
+        for key in self.nodes:
+            node=self.nodes[key]
+            node.LeftNodes,linked,missing,inputNode=self.GetLeftLinkNodes("Dependency",node,node.Dependencies)
+            linkedNodes+=linked
+            missingNodes+=missing
+            inputNodes+=inputNode
+        print(f"Linked {linkedNodes} Dependency nodes with {missingNodes} missing and {inputNodes} input nodes")    
+
+        #Walk over every link node, linking as we go
+        missingNodes=0
+        linkedNodes=0
+        inputNodes=0
+        for key in self.nodes:
+            node=self.nodes[key]
+            node.LeftLinkNodes,linked,missing,inputNodes=self.GetLeftLinkNodes("Link",node,node.LinkingFields)
+            linkedNodes+=linked
+            missingNodes+=missing
+            inputNodes+=inputNodes
+        print(f"Linked {linkedNodes} Link nodes with {missingNodes} missing and {inputNodes} input nodes")
+
+    #Now the left linkages have been built and validated we can build the right linkages
+    def RightLinkNodes(self):
+
+        #Rebuild node-deduplication on the left side data
+        print("Init Deduplication")
+        for key in self.nodes:
+            node=self.nodes[key]
+            node.BuildDeduplicationFromLeft()
+
+        #Walk through nodes and navigate on left linkages
+        print("Registering Right Linkages")
+        for key in self.nodes:
+            node=self.nodes[key]
+            
+            for leftKey in node.LeftNodes:
+                leftNode=node.LeftNodes[leftKey]
+                leftNode.AddRightSideLinkageDeduplicated(node,isLink=False)
+            
+            for leftKey in node.LeftLinkNodes:
+                leftNode=node.LeftLinkNodes[leftKey]
+                leftNode.AddRightSideLinkageDeduplicated(node,isLink=True)
+            
+        print("Node Linkage Complete!")
+        

@@ -1,0 +1,208 @@
+<html>
+    <head>
+        <title>Agent Service</title>
+        <link rel="stylesheet" href="static/chatbot.css">
+        
+        <!-- import jquery -->
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    </head>
+
+    <!-- javascript handler code -->
+    <script>
+
+        //Create a JSON request to http://127.0.0.1:5000/chat and msgbox response
+        $(document).ready(function(){
+            $("#chatbot").keypress(function(event){
+                var loadingDiv;
+                var keycode = (event.keyCode ? event.keyCode : event.which);
+                if(keycode == '13'){
+
+                    //Add in the message from the user as a div
+                    var usermessage = $("#chatbot").val();
+                    var newdiv = document.createElement("div");
+                    newdiv.className = "chat-user-reply";
+                    newdiv.textContent = usermessage;
+                    $("#chatbox").append(newdiv)
+                    
+                    //Add in a "loading" place holder div with loading gif for response
+                    var newdiv = document.createElement("div");
+                    newdiv.className = "chat-agent";
+                    newdiv.innerHTML = '<img src="static/Loading2.gif" alt="loading" style="align-items:center;justify-content:center;width:50px;height:50px;">';
+                    loadingDiv = newdiv;
+                    $("#chatbox").append(newdiv)
+
+                    scrollToBottom();    
+
+                    //set up an asynchronous call to the chatbot service
+                    $("#chatbot").val("");  //Clear chatbot box
+                    
+                    //Disable chatbot box util we get a response
+                    $("#chatbot").prop('disabled', true);
+                    var json_data = {"user": usermessage};
+                    $.ajax({
+                        type: "POST",
+                        url: "/chat",
+                        data: JSON.stringify(json_data),
+                        contentType: "application/json; charset=utf-8",
+                        dataType: "json",
+                        success: function(data){
+
+                            //Put the loaded response into the loading div - removing loading animation
+                            var chatbot = data["message"];
+                            var debugMsgs=data["debug"]
+
+                            //check if debugMsgs is a list
+                            if (Array.isArray(debugMsgs)) {
+
+                                //Navigate to url
+                                //navUrl="xl://Lineage/AccountUsage/summed_facility_limit";
+                                //window.location.href = navUrl;
+
+                                //Insert a new div before the loading div with the chatbot response
+                                debugMsgs.forEach(function(dbmsg) {
+                                    var newdiv = document.createElement("div");
+                                    newdiv.className = "chat-debug";
+                                    newdiv.textContent = dbmsg;
+                                    loadingDiv.parentNode.insertBefore(newdiv, loadingDiv);
+
+                                    //Check if the message is a URL
+                                    actionURL=formulateURL(dbmsg);
+                                    if (actionURL!="")
+                                    {
+                                        window.location.href = actionURL;
+                                    }
+                                    
+                                });
+                                
+                            }
+
+                            //if the message is ***RESET** then clear all items in the chatbox
+                            if (chatbot=="***RESET***")
+                            {
+                                $("#chatbox").empty();
+                            }
+                            else
+                            {
+                                //Replace newlines with <br> tags
+                                chatbot = chatbot.replace(/\n/g, "<br>");
+                                loadingDiv.innerHTML = chatbot;
+                                scrollToBottom();    
+                            }
+
+                            //Turn the chatbot box back on
+                            $("#chatbot").prop('disabled', false);
+                            //Set focus on chatbox
+                            $("#chatbot").focus();
+
+                       },
+                        failure: function(errMsg) {
+                            alert("Error loading response:" + errMsg);
+                        }
+                    });                    
+
+
+
+                }
+            });
+        });
+
+
+        // Function to scroll the chatbox to the bottom
+        function scrollToBottom() {
+        var chatbox = document.getElementById('chatbox');
+        chatbox.scrollTop = chatbox.scrollHeight;
+
+        }
+
+
+        function formulateURL(apiString) {
+        // Check if the string starts with "GetFieldPrerequisiteTables"
+        
+        if (apiString.indexOf("GetFieldPrerequisite") === 0) {
+            // Extract tableName and fieldName using a regular expression
+            const regex = /tableName=(.*?),fieldName=(.*)\)/;
+            const matches = apiString.match(regex);
+
+            if (matches) {
+                const tableName = matches[1];
+                const fieldName = matches[2];
+
+                // Formulate the new URL
+                //const newURL = 'xl://Lineage/${tableName}/${fieldName}';
+                var newURL = "xl://Lineage/" + tableName + "/" + fieldName;
+                return newURL;            
+            }
+            else {
+                return null;
+            }
+        }
+        else  {
+            return null;
+        } 
+       }
+    
+    </script>
+
+
+    <!-- Body backgound image gradientBG.png CSS override -->
+    <body style="background-image: url('static/gradientBG.png');">
+
+        <!-- <div id="chatbox"> 
+
+            <br>
+            <div class="chat-agent">
+                <div class="innertext">
+                    <b>Hi! I'm your AI Knowledge Assistant!</b><br><br>
+                    Ask me any question and I'll do my best to answer!<br>
+                    this an iterative chat so please feel free to ask follow up questions naturally
+                    <br><br>
+                    Wanna hear about: <a href="XL://sol_planet_001">Mercury</a><br>
+                    Wanna hear about: <a href="XL://sol_planet_005">Jupiter</a><br>
+                    Wanna hear about: <a href="XL://DF00000015">CRM ID</a><br>
+
+                </div>
+            </div>
+
+            <br>
+            
+            <div class="chat-user" id="chat-user">
+                <div class="innertext">
+                    <input type="text" name="chatbot" id="chatbot" class="chat-bubble" autofocus >  
+                </div>
+            </div>
+        </div> -->
+
+
+        <div class="container">
+            <div class="top">
+                <div id="chatbox"> 
+
+                    <!-- Initial message -->
+                    <br>
+                    <div class="chat-agent">
+                        <div class="innertext">
+                            <b>Hi! I'm Causality Automated Regression Testing AI</b><br><br>
+                            I'm here to answer your questions.<br>
+                            <br><br>
+                        </div>
+                    </div>
+                    <br>                    
+                    
+                </div>
+            </div>
+            <div class="bottom">
+                <div class="chat-user" id="chat-user">
+                    <div class="innertext">
+                        <!-- multi line input box 3 lines -->
+                        <textarea name="chatbot" id="chatbot" class="chat-bubble" autofocus rows="3" cols="50" style="overflow: hidden";></textarea>
+
+                        <!-- <input type="text" name="chatbot" id="chatbot" class="chat-bubble" autofocus >   -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        
+
+    </body>
+</html>

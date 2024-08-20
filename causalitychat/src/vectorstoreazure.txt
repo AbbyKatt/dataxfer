@@ -1,0 +1,156 @@
+#VectorStoreAzure - Utility class to store and retrieve embeddings from Azure AI Search
+import openai
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.models import VectorizedQuery
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient, SearchIndexerClient
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes.models import SearchIndex, ComplexField, SearchableField, SimpleField, SearchFieldDataType
+from azure.search.documents.indexes.models import (
+    SimpleField,
+    SearchFieldDataType,
+    SearchableField,
+    SearchField,
+    VectorSearch,
+    HnswAlgorithmConfiguration,
+    VectorSearchProfile,
+    SemanticConfiguration,
+    SemanticPrioritizedFields,
+    SemanticField,
+    SemanticSearch,
+    SearchIndex
+)
+
+def generate_embeddings(text):
+    """
+    Generate embeddings for a given text using OpenAI's API.
+
+    Parameters:
+    text (str): The text to generate embeddings for.
+
+    Returns:
+    dict: A dictionary containing the generated embeddings.
+    """
+    try:
+        # Call the embeddings endpoint
+        response = openai.Embedding.create(
+            model="text-embedding-3-small",  # Example model, adjust as needed
+            input=text
+        )
+        # Extract and return the embeddings
+        embeddings = response['data'][0]['embedding']
+        return embeddings
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
+# Example usage
+#text = "OpenAI is an AI research and deployment company."
+#embeddings = generate_embeddings(text)
+#print(embeddings)
+
+
+class VectorStoreAzure():
+
+    def __init__(self,service_name, admin_api_key):
+        self.service_name=service_name
+        self.admin_api_key=admin_api_key
+        self.endpoint = f"https://{service_name}.search.windows.net/"
+        self.credential = AzureKeyCredential(admin_api_key)
+        self.index_client = SearchIndexClient(self.endpoint, self.credential)
+
+    def VectorStoreExists(self,index_name):
+        try:
+            index_client = SearchIndexClient(endpoint=self.endpoint,credential=self.credential)
+            index = index_client.get_index(index_name)
+            print(f' {index.name} exists')
+            return True
+        except Exception as e:
+            print(f' {index_name} does not exist')
+            return False
+
+    def DeleteVectorStore(self,index_name):
+        index_client = SearchIndexClient(endpoint=self.endpoint, credential=self.credential)
+        index_client.delete_index(index_name)
+        print(f' {index_name} deleted')
+        return True
+
+    # Create a search index
+    def CreateVectorStore(self,index_name):
+        index_client = SearchIndexClient(endpoint=self.endpoint, credential=self.credential)
+        fields = [
+        SimpleField(name="uuid", type=SearchFieldDataType.String, key=True, sortable=True, filterable=True, facetable=True),
+        SearchableField(name="entity_type", type=SearchFieldDataType.String),
+        SearchableField(name="name", type=SearchFieldDataType.String),
+        SearchableField(name="content", type=SearchFieldDataType.String),
+        SearchField(name="contentVector", type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                    searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
+        ]
+
+        # Configure the vector search configuration  
+        vector_search = VectorSearch(
+        algorithms=[
+            HnswAlgorithmConfiguration(
+                name="myHnsw"
+            )],
+        profiles=[
+            VectorSearchProfile(
+                name="myHnswProfile",
+                algorithm_configuration_name="myHnsw",
+            )]
+        )
+
+        semantic_config = SemanticConfiguration(
+        name="entity-store-config",
+        prioritized_fields=SemanticPrioritizedFields(
+            title_field=SemanticField(field_name="name"),
+            keywords_fields=[SemanticField(field_name="content")],
+            content_fields=[SemanticField(field_name="content")]
+            )
+        )
+
+        # Create the semantic settings with the configuration
+        semantic_search = SemanticSearch(configurations=[semantic_config])
+
+        # Create the search index with the semantic settings
+        index = SearchIndex(name=index_name, fields=fields,
+                        vector_search=vector_search, semantic_search=semantic_search)
+        result = index_client.create_or_update_index(index)
+        print(f' {result.name} created')
+        return True
+
+
+    def InsertVectorRecords(self,index_name, records):
+        search_client = SearchClient(self.endpoint, index_name, self.credential)
+        result = search_client.upload_documents(records)
+        
+        # #Show success error for result
+        for itm in result:
+            print(itm)
+
+        print(f"Uploaded {len(records)} documents")
+        return True
+
+
+    def SearchVectorStore(self,index_name, searchTerm):
+
+        #Create embedding
+        embedding=generate_embeddings(searchTerm)
+
+        search_client = SearchClient(endpoint=self.endpoint, index_name=index_name, credential=self.credential)
+        vector_query = VectorizedQuery(vector=embedding, k_nearest_neighbors=3, fields="contentVector")
+        
+        results = search_client.search(  
+            search_text=None,  
+            vector_queries= [vector_query],
+            select=["content"],
+        )
+
+        retStr=""  
+        for result in results:  
+            #print(f"Score: {result['@search.score']}")  
+            #print(f"Content: {result['content']}")  
+            retStr+=result['content']+"\n"
+            #print(f"Category: {result['category']}\n")  
+        print(retStr)
+        return retStr

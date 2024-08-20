@@ -1,0 +1,32 @@
+#DiskCache -> for saving conversation state for the chatbot
+import os
+import uuid
+
+class DiskCache:
+    def __init__(self, path):
+        self.path = path
+        try:
+            # Create the directory if it does not exist
+            os.makedirs(self.path, exist_ok=True)
+        except Exception as e:
+            raise Exception(f"Could not create the directory at {self.path}: {e}")
+
+    def get(self, uuid):
+        try:
+            with open(os.path.join(self.path, uuid), 'r') as file:
+                return file.read()
+        except FileNotFoundError:
+            return None  # Or raise an exception if you prefer
+        except Exception as e:
+            raise Exception(f"Error reading from {uuid}: {e}")
+
+    def put(self, data):
+        try:
+            #make uuid
+            guid=str(uuid.uuid4().hex)
+            with open(os.path.join(self.path, guid), 'w') as file:
+                print(f"Writing to  {self.path} : {guid}")
+                file.write(data)
+            return guid
+        except Exception as e:
+            raise Exception(f"Error writing to  {self.path} : {guid}: {e}")
